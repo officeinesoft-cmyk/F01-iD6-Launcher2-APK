@@ -1,31 +1,21 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-    <application
-        android:theme="@style/AppTheme"
-        android:label="F01 iD6 Launcher"
-        android:hardwareAccelerated="true"
-        android:resizeableActivity="true"
-        android:allowBackup="false">
-
-        <activity
-            android:name=".MainActivity"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|keyboardHidden"
-            android:exported="true">
-
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.HOME" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-
-        </activity>
-
-    </application>
-
-</manifest>
+- <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+- <application android:theme="@style/AppTheme" android:label="F01 iDrive Diagnostic V5" android:allowBackup="false">
+- <activity android:name=".MainActivity" android:screenOrientation="landscape" android:exported="true">
+- <intent-filter>
+  <action android:name="android.intent.action.MAIN" /> 
+  <category android:name="android.intent.category.LAUNCHER" /> 
+  </intent-filter>
+- <intent-filter>
+  <action android:name="android.intent.action.MAIN" /> 
+  <category android:name="android.intent.category.HOME" /> 
+  <category android:name="android.intent.category.DEFAULT" /> 
+  </intent-filter>
+  </activity>
+- <service android:name=".IdriveAccessibilityService" android:label="F01 iDrive Diagnostic" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
+- <intent-filter>
+  <action android:name="android.accessibilityservice.AccessibilityService" /> 
+  </intent-filter>
+  <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service_config" /> 
+  </service>
+  </application>
+  </manifest>
