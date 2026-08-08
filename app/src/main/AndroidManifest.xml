@@ -1,5 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:theme="@style/AppTheme"
         android:label="F01 iD6 Launcher"
@@ -25,6 +32,7 @@
             </intent-filter>
 
         </activity>
+
     </application>
 
 </manifest>
