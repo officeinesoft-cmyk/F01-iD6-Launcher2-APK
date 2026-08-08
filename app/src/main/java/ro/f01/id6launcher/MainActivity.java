@@ -11,1336 +11,430 @@ import android.net.Uri;
 import android.provider.Settings;
 import android.view.*;
 import android.widget.Toast;
-
 import java.text.SimpleDateFormat;
 import java.util.*;
 
 public class MainActivity extends Activity {
 
-    LauncherView launcher;
+    LauncherView view;
 
-    @Override
-    public void onCreate(Bundle b) {
+    @Override public void onCreate(Bundle b) {
         super.onCreate(b);
-
-        getWindow().setFlags(
-                WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                WindowManager.LayoutParams.FLAG_FULLSCREEN
-        );
-
-        hideSystemUi();
-
-        launcher = new LauncherView(this);
-        setContentView(launcher);
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        hideBars();
+        view = new LauncherView(this);
+        setContentView(view);
     }
 
-    @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) hideSystemUi();
+        if (hasFocus) hideBars();
     }
 
-    void hideSystemUi() {
+    void hideBars() {
         getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_FULLSCREEN |
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
                 View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION |
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-        );
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
     }
 
-    void openNavigation() {
-        PackageManager pm = getPackageManager();
-
-        String[] packages = {
-                "com.waze",
-                "com.google.android.apps.maps"
-        };
-
-        for (String pkg : packages) {
-            try {
-                Intent intent = pm.getLaunchIntentForPackage(pkg);
-                if (intent != null) {
-                    startActivity(intent);
-                    return;
-                }
-            } catch (Exception ignored) {}
-        }
-
-        try {
-            startActivity(new Intent(
-                    Intent.ACTION_VIEW,
-                    Uri.parse("geo:0,0?q=Bucharest")
-            ));
-        } catch (Exception e) {
-            Toast.makeText(
-                    this,
-                    "Nu am gasit aplicatia de navigatie",
-                    Toast.LENGTH_SHORT
-            ).show();
-        }
+    void openNav() {
+        openFirst(new String[]{"com.waze","com.google.android.apps.maps"},
+                new Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=Bucharest")));
     }
 
     void openMedia() {
-        PackageManager pm = getPackageManager();
-
-        String[] packages = {
-                "com.spotify.music",
-                "com.google.android.apps.youtube.music",
-                "com.maxmpz.audioplayer"
-        };
-
-        for (String pkg : packages) {
-            try {
-                Intent intent = pm.getLaunchIntentForPackage(pkg);
-                if (intent != null) {
-                    startActivity(intent);
-                    return;
-                }
-            } catch (Exception ignored) {}
-        }
-
-        try {
-            startActivity(new Intent("android.intent.action.MUSIC_PLAYER"));
-        } catch (Exception e) {
-            Toast.makeText(
-                    this,
-                    "Nu am gasit playerul audio",
-                    Toast.LENGTH_SHORT
-            ).show();
-        }
+        openFirst(new String[]{"com.spotify.music","com.google.android.apps.youtube.music",
+                        "com.maxmpz.audioplayer"},
+                new Intent("android.intent.action.MUSIC_PLAYER"));
     }
 
     void openPhone() {
-        try {
-            startActivity(new Intent(Intent.ACTION_DIAL));
-        } catch (Exception e) {
-            Toast.makeText(
-                    this,
-                    "Telefon indisponibil",
-                    Toast.LENGTH_SHORT
-            ).show();
-        }
+        try { startActivity(new Intent(Intent.ACTION_DIAL)); }
+        catch (Exception e) { toast("Telefon indisponibil"); }
     }
 
     void openSettings() {
-        try {
-            startActivity(new Intent(Settings.ACTION_SETTINGS));
-        } catch (Exception ignored) {}
+        try { startActivity(new Intent(Settings.ACTION_SETTINGS)); }
+        catch (Exception ignored) {}
+    }
+
+    void openFirst(String[] pkgs, Intent fallback) {
+        PackageManager pm = getPackageManager();
+        for (String pkg : pkgs) {
+            try {
+                Intent i = pm.getLaunchIntentForPackage(pkg);
+                if (i != null) { startActivity(i); return; }
+            } catch (Exception ignored) {}
+        }
+        try { startActivity(fallback); }
+        catch (Exception e) { toast("Aplicatia nu este disponibila"); }
+    }
+
+    void toast(String s) {
+        Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
+    }
+
+    @Override public boolean dispatchKeyEvent(KeyEvent e) {
+        if (view != null && view.handleKey(e)) return true;
+        return super.dispatchKeyEvent(e);
+    }
+
+    @Override public boolean dispatchGenericMotionEvent(MotionEvent e) {
+        if (view != null && view.handleMotion(e)) return true;
+        return super.dispatchGenericMotionEvent(e);
     }
 
     class AppEntry {
         String label;
-        String packageName;
         Drawable icon;
         Intent intent;
     }
 
-    class DiagnosticEntry {
-        String line1;
-        String line2;
-
-        DiagnosticEntry(String a, String b) {
-            line1 = a;
-            line2 = b;
-        }
-    }
-
     class LauncherView extends View {
+        final float BW = 1280f, BH = 480f;
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Handler handler = new Handler();
 
-        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        Bitmap home;
+        String[] menu = {
+                "Multimedia","Radio","Telephone","Navigation",
+                "ConnectedDrive","Vehicle Info","Settings","Apps"
+        };
 
-        final float BASE_W = 1280f;
-        final float BASE_H = 480f;
-
-        // 0=HOME, 1=APPS, 2=DIAGNOSTIC
-        int page = 0;
+        int page = 0; // 0 NBT, 1 Apps, 2 Diagnostic
+        int selected = 0;
+        String keyDiag = "Astept comanda iDrive...";
+        String motionDiag = "Niciun MotionEvent detectat";
 
         ArrayList<AppEntry> apps = new ArrayList<>();
-        ArrayList<DiagnosticEntry> diagnostics = new ArrayList<>();
+        float downX, downY, lastY, appScroll = 0f;
+        boolean vertical = false;
 
-        float downX, downY, lastY;
-        float appScroll = 0f;
-        float diagScroll = 0f;
-        boolean verticalScrolling = false;
-
-        Handler clockHandler = new Handler();
-
-        Runnable clockTick = new Runnable() {
-            @Override
-            public void run() {
+        Runnable tick = new Runnable() {
+            @Override public void run() {
                 invalidate();
-                clockHandler.postDelayed(this, 1000);
+                handler.postDelayed(this, 1000);
             }
         };
 
-        LauncherView(Context context) {
-            super(context);
-
-            BitmapDrawable drawable =
-                    (BitmapDrawable) getResources().getDrawable(
-                            R.drawable.home_screen
-                    );
-
-            home = drawable.getBitmap();
-
+        LauncherView(Context c) {
+            super(c);
             setFocusable(true);
-
+            setFocusableInTouchMode(true);
+            requestFocus();
             loadApps();
-            scanDiagnosticPackages();
-
-            clockHandler.post(clockTick);
+            handler.post(tick);
         }
 
-        float sx() {
-            return getWidth() / BASE_W;
+        float sx(){ return getWidth()/BW; }
+        float sy(){ return getHeight()/BH; }
+
+        void fill(Canvas c,int color,float l,float t,float r,float b){
+            p.setStyle(Paint.Style.FILL); p.setColor(color);
+            c.drawRect(l*sx(),t*sy(),r*sx(),b*sy(),p);
         }
 
-        float sy() {
-            return getHeight() / BASE_H;
+        void text(Canvas c,String s,float x,float y,float size,int color,Paint.Align a){
+            p.setStyle(Paint.Style.FILL); p.setColor(color); p.setTextAlign(a);
+            p.setTypeface(Typeface.create("sans",Typeface.NORMAL));
+            p.setTextSize(size*sy());
+            c.drawText(s,x*sx(),y*sy(),p);
         }
 
-        @Override
-        protected void onDetachedFromWindow() {
-            super.onDetachedFromWindow();
-            clockHandler.removeCallbacks(clockTick);
+        @Override protected void onDraw(Canvas c) {
+            if(page==0) drawNBT(c);
+            else if(page==1) drawApps(c);
+            else drawDiag(c);
         }
 
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
+        void drawNBT(Canvas c) {
+            c.drawColor(Color.rgb(4,5,6));
+            fill(c,Color.rgb(15,17,19),0,0,1280,50);
 
-            if (page == 0) {
-                drawHome(canvas);
-            } else if (page == 1) {
-                drawApps(canvas);
+            String tm = new SimpleDateFormat("HH:mm",Locale.getDefault()).format(new Date());
+            String dt = new SimpleDateFormat("dd.MM.yyyy",new Locale("ro","RO")).format(new Date());
+
+            text(c,"BMW",24,32,17,Color.WHITE,Paint.Align.LEFT);
+            text(c,dt,1080,31,13,Color.LTGRAY,Paint.Align.RIGHT);
+            text(c,tm,1240,33,21,Color.WHITE,Paint.Align.RIGHT);
+
+            float top=68,row=42;
+            for(int i=0;i<menu.length;i++){
+                float y=top+i*row;
+                if(i==selected){
+                    fill(c,Color.rgb(45,47,49),32,y-26,420,y+8);
+                    fill(c,Color.rgb(235,127,25),32,y-26,37,y+8);
+                }
+                text(c,menu[i],58,y,18,
+                        i==selected?Color.WHITE:Color.rgb(185,188,190),
+                        Paint.Align.LEFT);
+            }
+
+            fill(c,Color.rgb(12,14,16),460,68,1250,408);
+            fill(c,Color.rgb(52,54,56),460,68,1250,71);
+
+            String title=menu[selected];
+            text(c,title.toUpperCase(Locale.US),495,108,15,Color.LTGRAY,Paint.Align.LEFT);
+
+            if(selected==0 || selected==1){
+                text(c,"Media / Radio",495,158,25,Color.WHITE,Paint.Align.LEFT);
+                text(c,"Player Android",495,190,15,Color.GRAY,Paint.Align.LEFT);
+            } else if(selected==2){
+                text(c,"Telephone",495,158,25,Color.WHITE,Paint.Align.LEFT);
+                text(c,"Bluetooth / Dialer",495,190,15,Color.GRAY,Paint.Align.LEFT);
+            } else if(selected==3){
+                text(c,"Navigation",495,158,25,Color.WHITE,Paint.Align.LEFT);
+                text(c,"Waze / Google Maps",495,190,15,Color.GRAY,Paint.Align.LEFT);
+            } else if(selected==5){
+                text(c,"BMW 7 Series",495,155,25,Color.WHITE,Paint.Align.LEFT);
+                text(c,"F01 2011 pre-LCI",495,188,16,Color.LTGRAY,Paint.Align.LEFT);
+                text(c,"DJ 10 SDS",495,220,18,Color.WHITE,Paint.Align.LEFT);
+            } else if(selected==6){
+                text(c,"Android Settings",495,158,25,Color.WHITE,Paint.Align.LEFT);
+            } else if(selected==7){
+                text(c,"Installed applications",495,158,25,Color.WHITE,Paint.Align.LEFT);
+                text(c,"Apasa iDrive pentru lista",495,190,15,Color.GRAY,Paint.Align.LEFT);
             } else {
-                drawDiagnostics(canvas);
+                text(c,"ConnectedDrive",495,158,25,Color.WHITE,Paint.Align.LEFT);
+                text(c,"CAN integration in lucru",495,190,15,Color.GRAY,Paint.Align.LEFT);
+            }
+
+            fill(c,Color.rgb(15,17,19),0,430,1280,480);
+            text(c,"iDrive: rotire = selectie • apasare = OK • BACK = inapoi",
+                    24,460,12,Color.rgb(165,168,170),Paint.Align.LEFT);
+            text(c,"DIAG",1238,460,12,Color.rgb(235,127,25),Paint.Align.RIGHT);
+        }
+
+        void openSelected(){
+            switch(selected){
+                case 0:
+                case 1: openMedia(); break;
+                case 2: openPhone(); break;
+                case 3: openNav(); break;
+                case 5: toast("BMW F01 2011 pre-LCI • DJ 10 SDS"); break;
+                case 6: openSettings(); break;
+                case 7: page=1; invalidate(); break;
+                default: toast("Functie in curs de integrare");
             }
         }
 
-        void drawHome(Canvas canvas) {
-
-            Rect source = new Rect(
-                    0, 0,
-                    home.getWidth(),
-                    home.getHeight()
-            );
-
-            Rect destination = new Rect(
-                    0, 0,
-                    getWidth(),
-                    getHeight()
-            );
-
-            canvas.drawBitmap(
-                    home,
-                    source,
-                    destination,
-                    paint
-            );
-
-            // OVERLAY REAL: ora si data din Android
-            Date now = new Date();
-
-            SimpleDateFormat timeFormat =
-                    new SimpleDateFormat(
-                            "HH:mm",
-                            Locale.getDefault()
-                    );
-
-            SimpleDateFormat dateFormat =
-                    new SimpleDateFormat(
-                            "EEE, dd.MM.yyyy",
-                            new Locale("ro", "RO")
-                    );
-
-            String time = timeFormat.format(now);
-            String date = dateFormat.format(now);
-
-            // fundal discret peste textul static din imagine
-            paint.setColor(Color.argb(215, 8, 10, 12));
-            canvas.drawRoundRect(
-                    515 * sx(),
-                    4 * sy(),
-                    805 * sx(),
-                    55 * sy(),
-                    8 * sx(),
-                    8 * sy(),
-                    paint
-            );
-
-            paint.setColor(Color.WHITE);
-            paint.setTextAlign(Paint.Align.CENTER);
-            paint.setTypeface(Typeface.create("sans", Typeface.NORMAL));
-
-            paint.setTextSize(27 * sy());
-            canvas.drawText(
-                    time,
-                    590 * sx(),
-                    37 * sy(),
-                    paint
-            );
-
-            paint.setTextSize(15 * sy());
-            paint.setColor(Color.LTGRAY);
-
-            canvas.drawText(
-                    date,
-                    710 * sx(),
-                    35 * sy(),
-                    paint
-            );
-
-            // CAN/CLIMA: nu inventam valori.
-            // Afisam doar starea de integrare pana identificam serviciul MCU.
-            paint.setTextAlign(Paint.Align.LEFT);
-            paint.setTextSize(11 * sy());
-            paint.setColor(Color.rgb(180, 185, 188));
-
-            canvas.drawText(
-                    "CAN: TsBMW / YX-BMW-GD-2 • diagnostic activ",
-                    22 * sx(),
-                    466 * sy(),
-                    paint
-            );
-
-            paint.setTextAlign(Paint.Align.RIGHT);
-            paint.setTextSize(14 * sy());
-            paint.setColor(Color.WHITE);
-
-            canvas.drawText(
-                    "APPS  ›",
-                    1255 * sx(),
-                    465 * sy(),
-                    paint
-            );
+        void move(int d){
+            selected+=d;
+            if(selected<0) selected=menu.length-1;
+            if(selected>=menu.length) selected=0;
+            invalidate();
         }
 
-        void loadApps() {
+        boolean handleKey(KeyEvent e){
+            String act=e.getAction()==KeyEvent.ACTION_DOWN?"DOWN":"UP";
+            keyDiag="KEY "+act+" code="+e.getKeyCode()+" "
+                    +KeyEvent.keyCodeToString(e.getKeyCode())
+                    +" scan="+e.getScanCode()+" repeat="+e.getRepeatCount();
+            invalidate();
 
+            if(e.getAction()!=KeyEvent.ACTION_DOWN) return false;
+            int k=e.getKeyCode();
+
+            if(k==KeyEvent.KEYCODE_DPAD_UP || k==KeyEvent.KEYCODE_DPAD_LEFT ||
+                    k==KeyEvent.KEYCODE_MEDIA_PREVIOUS){
+                if(page==0) move(-1);
+                return true;
+            }
+
+            if(k==KeyEvent.KEYCODE_DPAD_DOWN || k==KeyEvent.KEYCODE_DPAD_RIGHT ||
+                    k==KeyEvent.KEYCODE_MEDIA_NEXT){
+                if(page==0) move(1);
+                return true;
+            }
+
+            if(k==KeyEvent.KEYCODE_DPAD_CENTER || k==KeyEvent.KEYCODE_ENTER){
+                if(page==0) openSelected();
+                return true;
+            }
+
+            if(k==KeyEvent.KEYCODE_BACK || k==KeyEvent.KEYCODE_ESCAPE){
+                if(page!=0){ page=0; invalidate(); return true; }
+            }
+
+            return false;
+        }
+
+        boolean handleMotion(MotionEvent e){
+            float v=e.getAxisValue(MotionEvent.AXIS_VSCROLL);
+            float h=e.getAxisValue(MotionEvent.AXIS_HSCROLL);
+            float s=e.getAxisValue(MotionEvent.AXIS_SCROLL);
+
+            motionDiag="src="+e.getSource()+" action="+e.getAction()
+                    +" v="+v+" h="+h+" scroll="+s;
+            invalidate();
+
+            float val=Math.abs(v)>0.01f?v:(Math.abs(h)>0.01f?h:s);
+            if(page==0 && Math.abs(val)>0.01f){
+                if(val>0) move(-1); else move(1);
+                return true;
+            }
+            return false;
+        }
+
+        void loadApps(){
             apps.clear();
+            PackageManager pm=getPackageManager();
+            Intent q=new Intent(Intent.ACTION_MAIN,null);
+            q.addCategory(Intent.CATEGORY_LAUNCHER);
+            List<ResolveInfo> list=pm.queryIntentActivities(q,0);
 
-            PackageManager pm = getPackageManager();
-
-            Intent query =
-                    new Intent(
-                            Intent.ACTION_MAIN,
-                            null
-                    );
-
-            query.addCategory(
-                    Intent.CATEGORY_LAUNCHER
-            );
-
-            List<ResolveInfo> list =
-                    pm.queryIntentActivities(
-                            query,
-                            0
-                    );
-
-            Collections.sort(
-                    list,
-                    new Comparator<ResolveInfo>() {
-                        @Override
-                        public int compare(
-                                ResolveInfo a,
-                                ResolveInfo b
-                        ) {
-                            return a.loadLabel(pm)
-                                    .toString()
-                                    .compareToIgnoreCase(
-                                            b.loadLabel(pm)
-                                                    .toString()
-                                    );
-                        }
-                    }
-            );
-
-            for (ResolveInfo ri : list) {
-
-                String pkg =
-                        ri.activityInfo.packageName;
-
-                if (pkg.equals(getPackageName())) {
-                    continue;
+            Collections.sort(list,new Comparator<ResolveInfo>(){
+                @Override public int compare(ResolveInfo a,ResolveInfo b){
+                    return a.loadLabel(pm).toString()
+                            .compareToIgnoreCase(b.loadLabel(pm).toString());
                 }
+            });
 
-                AppEntry entry =
-                        new AppEntry();
-
-                entry.label =
-                        ri.loadLabel(pm)
-                                .toString();
-
-                entry.packageName =
-                        pkg;
-
-                entry.icon =
-                        ri.loadIcon(pm);
-
-                entry.intent =
-                        new Intent(
-                                Intent.ACTION_MAIN
-                        );
-
-                entry.intent.addCategory(
-                        Intent.CATEGORY_LAUNCHER
-                );
-
-                entry.intent.setComponent(
-                        new ComponentName(
-                                pkg,
-                                ri.activityInfo.name
-                        )
-                );
-
-                entry.intent.setFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK
-                );
-
-                apps.add(entry);
+            for(ResolveInfo ri:list){
+                if(ri.activityInfo.packageName.equals(getPackageName())) continue;
+                AppEntry a=new AppEntry();
+                a.label=ri.loadLabel(pm).toString();
+                a.icon=ri.loadIcon(pm);
+                a.intent=new Intent(Intent.ACTION_MAIN);
+                a.intent.addCategory(Intent.CATEGORY_LAUNCHER);
+                a.intent.setComponent(new ComponentName(
+                        ri.activityInfo.packageName,ri.activityInfo.name));
+                a.intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                apps.add(a);
             }
         }
 
-        void scanDiagnosticPackages() {
-
-            diagnostics.clear();
-
-            PackageManager pm = getPackageManager();
-
-            List<PackageInfo> packages;
-
-            try {
-                packages =
-                        pm.getInstalledPackages(
-                                PackageManager.GET_ACTIVITIES |
-                                PackageManager.GET_SERVICES |
-                                PackageManager.GET_RECEIVERS
-                        );
-            } catch (Exception e) {
-                diagnostics.add(
-                        new DiagnosticEntry(
-                                "Diagnostic error",
-                                e.toString()
-                        )
-                );
-                return;
+        Bitmap iconBitmap(Drawable d,int w,int h){
+            if(d instanceof BitmapDrawable){
+                return Bitmap.createScaledBitmap(((BitmapDrawable)d).getBitmap(),w,h,true);
             }
+            Bitmap b=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
+            Canvas c=new Canvas(b);
+            d.setBounds(0,0,w,h); d.draw(c); return b;
+        }
 
-            String[] keywords = {
-                    "can",
-                    "mcu",
-                    "car",
-                    "vehicle",
-                    "auto",
-                    "bmw",
-                    "ts",
-                    "yx",
-                    "hmi",
-                    "media",
-                    "bluetooth",
-                    "bt"
-            };
+        void drawApps(Canvas c){
+            c.drawColor(Color.rgb(5,6,7));
+            fill(c,Color.rgb(17,19,21),0,0,1280,50);
+            text(c,"APPS",24,33,18,Color.WHITE,Paint.Align.LEFT);
+            text(c,"‹ HOME",1240,33,13,Color.LTGRAY,Paint.Align.RIGHT);
 
-            for (PackageInfo pi : packages) {
+            int cols=6;
+            float cellW=1280f/cols, cellH=92f, top=62f-appScroll;
 
-                String pkg =
-                        pi.packageName == null
-                                ? ""
-                                : pi.packageName;
+            for(int i=0;i<apps.size();i++){
+                int row=i/cols,col=i%cols;
+                float l=col*cellW+9, y=top+row*cellH, r=(col+1)*cellW-9, b=y+80;
+                if(b<50 || y>480) continue;
 
-                String label = "";
+                fill(c,Color.rgb(18,20,22),l,y,r,b);
 
-                try {
-                    ApplicationInfo ai =
-                            pm.getApplicationInfo(
-                                    pkg,
-                                    0
-                            );
+                try{
+                    Bitmap icon=iconBitmap(apps.get(i).icon,38,38);
+                    Rect src=new Rect(0,0,icon.getWidth(),icon.getHeight());
+                    RectF dst=new RectF((l+10)*sx(),(y+18)*sy(),
+                            (l+48)*sx(),(y+56)*sy());
+                    c.drawBitmap(icon,src,dst,p);
+                }catch(Exception ignored){}
 
-                    label =
-                            pm.getApplicationLabel(ai)
-                                    .toString();
-
-                } catch (Exception ignored) {}
-
-                String haystack =
-                        (pkg + " " + label)
-                                .toLowerCase(Locale.US);
-
-                boolean match = false;
-
-                for (String keyword : keywords) {
-
-                    if (haystack.contains(keyword)) {
-                        match = true;
-                        break;
-                    }
-                }
-
-                if (!match) {
-                    continue;
-                }
-
-                String version =
-                        pi.versionName == null
-                                ? ""
-                                : pi.versionName;
-
-                diagnostics.add(
-                        new DiagnosticEntry(
-                                label.length() == 0
-                                        ? pkg
-                                        : label,
-                                pkg + "   v" + version
-                        )
-                );
-
-                if (pi.services != null) {
-                    for (ServiceInfo si : pi.services) {
-
-                        String name =
-                                si.name == null
-                                        ? ""
-                                        : si.name;
-
-                        String lower =
-                                name.toLowerCase(Locale.US);
-
-                        if (
-                                lower.contains("can") ||
-                                lower.contains("mcu") ||
-                                lower.contains("car") ||
-                                lower.contains("vehicle") ||
-                                lower.contains("bmw")
-                        ) {
-                            diagnostics.add(
-                                    new DiagnosticEntry(
-                                            "SERVICE",
-                                            name
-                                    )
-                            );
-                        }
-                    }
-                }
-
-                if (pi.receivers != null) {
-                    for (ActivityInfo ri : pi.receivers) {
-
-                        String name =
-                                ri.name == null
-                                        ? ""
-                                        : ri.name;
-
-                        String lower =
-                                name.toLowerCase(Locale.US);
-
-                        if (
-                                lower.contains("can") ||
-                                lower.contains("mcu") ||
-                                lower.contains("car") ||
-                                lower.contains("vehicle") ||
-                                lower.contains("bmw")
-                        ) {
-                            diagnostics.add(
-                                    new DiagnosticEntry(
-                                            "RECEIVER",
-                                            name
-                                    )
-                            );
-                        }
-                    }
-                }
-            }
-
-            if (diagnostics.size() == 0) {
-
-                diagnostics.add(
-                        new DiagnosticEntry(
-                                "Nu am gasit candidati evidenti",
-                                "TsBMW/YX poate folosi un serviciu cu nume generic."
-                        )
-                );
+                String label=apps.get(i).label;
+                if(label.length()>15) label=label.substring(0,14)+"…";
+                text(c,label,l+58,y+43,12,Color.WHITE,Paint.Align.LEFT);
             }
         }
 
-        Bitmap drawableToBitmap(
-                Drawable drawable,
-                int width,
-                int height
-        ) {
+        void drawDiag(Canvas c){
+            c.drawColor(Color.rgb(4,5,6));
+            fill(c,Color.rgb(18,20,22),0,0,1280,55);
+            text(c,"iDrive INPUT DIAGNOSTIC",24,36,19,Color.WHITE,Paint.Align.LEFT);
+            text(c,"‹ HOME",1240,36,13,Color.LTGRAY,Paint.Align.RIGHT);
 
-            if (drawable instanceof BitmapDrawable) {
+            text(c,"Rotește, apasă, înclină și folosește BACK/MENU.",
+                    26,92,14,Color.LTGRAY,Paint.Align.LEFT);
 
-                Bitmap bitmap =
-                        ((BitmapDrawable) drawable)
-                                .getBitmap();
+            fill(c,Color.rgb(20,22,24),24,115,1255,205);
+            text(c,"ULTIMUL KEY EVENT",40,144,12,Color.rgb(235,127,25),Paint.Align.LEFT);
+            text(c,keyDiag,40,180,15,Color.WHITE,Paint.Align.LEFT);
 
-                return Bitmap.createScaledBitmap(
-                        bitmap,
-                        width,
-                        height,
-                        true
-                );
-            }
+            fill(c,Color.rgb(20,22,24),24,225,1255,315);
+            text(c,"ULTIMUL MOTION EVENT",40,254,12,Color.rgb(235,127,25),Paint.Align.LEFT);
+            text(c,motionDiag,40,290,15,Color.WHITE,Paint.Align.LEFT);
 
-            Bitmap bitmap =
-                    Bitmap.createBitmap(
-                            width,
-                            height,
-                            Bitmap.Config.ARGB_8888
-                    );
-
-            Canvas canvas =
-                    new Canvas(bitmap);
-
-            drawable.setBounds(
-                    0,
-                    0,
-                    width,
-                    height
-            );
-
-            drawable.draw(canvas);
-
-            return bitmap;
+            text(c,"Fă o poză după fiecare comandă iDrive.",
+                    26,370,14,Color.LTGRAY,Paint.Align.LEFT);
+            text(c,"Cu keyCode / scanCode mapăm controllerul 1:1.",
+                    26,400,14,Color.LTGRAY,Paint.Align.LEFT);
         }
 
-        void drawApps(Canvas canvas) {
+        @Override public boolean onTouchEvent(MotionEvent e){
+            float x=e.getX()/sx(), y=e.getY()/sy();
 
-            canvas.drawColor(
-                    Color.rgb(
-                            9,
-                            11,
-                            13
-                    )
-            );
-
-            paint.setColor(
-                    Color.rgb(
-                            23,
-                            26,
-                            28
-                    )
-            );
-
-            canvas.drawRect(
-                    0,
-                    0,
-                    getWidth(),
-                    58 * sy(),
-                    paint
-            );
-
-            paint.setTypeface(
-                    Typeface.create(
-                            "sans",
-                            Typeface.NORMAL
-                    )
-            );
-
-            paint.setTextAlign(
-                    Paint.Align.LEFT
-            );
-
-            paint.setTextSize(
-                    25 * sy()
-            );
-
-            paint.setColor(
-                    Color.WHITE
-            );
-
-            canvas.drawText(
-                    "APPS",
-                    28 * sx(),
-                    39 * sy(),
-                    paint
-            );
-
-            paint.setTextAlign(
-                    Paint.Align.RIGHT
-            );
-
-            paint.setTextSize(
-                    14 * sy()
-            );
-
-            paint.setColor(
-                    Color.LTGRAY
-            );
-
-            canvas.drawText(
-                    "‹ HOME     DIAGNOSTIC ›",
-                    1245 * sx(),
-                    38 * sy(),
-                    paint
-            );
-
-            int columns = 5;
-
-            float cellWidth =
-                    1280f / columns;
-
-            float cellHeight =
-                    118f;
-
-            float top =
-                    70f - appScroll;
-
-            for (
-                    int i = 0;
-                    i < apps.size();
-                    i++
-            ) {
-
-                int row =
-                        i / columns;
-
-                int column =
-                        i % columns;
-
-                float left =
-                        column * cellWidth
-                                + 12;
-
-                float itemTop =
-                        top +
-                        row * cellHeight;
-
-                float right =
-                        (column + 1)
-                                * cellWidth
-                                - 12;
-
-                float bottom =
-                        itemTop
-                                + cellHeight
-                                - 10;
-
-                if (
-                        bottom < 60 ||
-                        itemTop > 480
-                ) {
-                    continue;
-                }
-
-                paint.setColor(
-                        Color.rgb(
-                                22,
-                                25,
-                                27
-                        )
-                );
-
-                canvas.drawRoundRect(
-                        left * sx(),
-                        itemTop * sy(),
-                        right * sx(),
-                        bottom * sy(),
-                        10 * sx(),
-                        10 * sy(),
-                        paint
-                );
-
-                paint.setColor(
-                        Color.rgb(
-                                242,
-                                139,
-                                38
-                        )
-                );
-
-                canvas.drawRect(
-                        left * sx(),
-                        itemTop * sy(),
-                        right * sx(),
-                        (itemTop + 3) * sy(),
-                        paint
-                );
-
-                AppEntry app =
-                        apps.get(i);
-
-                try {
-
-                    Bitmap icon =
-                            drawableToBitmap(
-                                    app.icon,
-                                    54,
-                                    54
-                            );
-
-                    Rect src =
-                            new Rect(
-                                    0,
-                                    0,
-                                    icon.getWidth(),
-                                    icon.getHeight()
-                            );
-
-                    RectF dst =
-                            new RectF(
-                                    (left + 18) * sx(),
-                                    (itemTop + 17) * sy(),
-                                    (left + 72) * sx(),
-                                    (itemTop + 71) * sy()
-                            );
-
-                    canvas.drawBitmap(
-                            icon,
-                            src,
-                            dst,
-                            paint
-                    );
-
-                } catch (Exception ignored) {}
-
-                paint.setTextAlign(
-                        Paint.Align.LEFT
-                );
-
-                paint.setTextSize(
-                        15 * sy()
-                );
-
-                paint.setColor(
-                        Color.WHITE
-                );
-
-                String label =
-                        app.label;
-
-                if (
-                        label.length() > 19
-                ) {
-                    label =
-                            label.substring(
-                                    0,
-                                    18
-                            ) + "…";
-                }
-
-                canvas.drawText(
-                        label,
-                        (left + 86) * sx(),
-                        (itemTop + 52) * sy(),
-                        paint
-                );
-
-                paint.setTextSize(
-                        10 * sy()
-                );
-
-                paint.setColor(
-                        Color.GRAY
-                );
-
-                canvas.drawText(
-                        app.packageName,
-                        (left + 86) * sx(),
-                        (itemTop + 72) * sy(),
-                        paint
-                );
+            if(e.getAction()==MotionEvent.ACTION_DOWN){
+                downX=x; downY=y; lastY=y; vertical=false; return true;
             }
-        }
 
-        void drawDiagnostics(Canvas canvas) {
-
-            canvas.drawColor(
-                    Color.rgb(
-                            7,
-                            9,
-                            11
-                    )
-            );
-
-            paint.setColor(
-                    Color.rgb(
-                            24,
-                            27,
-                            29
-                    )
-            );
-
-            canvas.drawRect(
-                    0,
-                    0,
-                    getWidth(),
-                    58 * sy(),
-                    paint
-            );
-
-            paint.setTextAlign(
-                    Paint.Align.LEFT
-            );
-
-            paint.setTypeface(
-                    Typeface.create(
-                            "sans",
-                            Typeface.NORMAL
-                    )
-            );
-
-            paint.setTextSize(
-                    23 * sy()
-            );
-
-            paint.setColor(
-                    Color.WHITE
-            );
-
-            canvas.drawText(
-                    "CAN / MCU DIAGNOSTIC",
-                    25 * sx(),
-                    38 * sy(),
-                    paint
-            );
-
-            paint.setTextAlign(
-                    Paint.Align.RIGHT
-            );
-
-            paint.setTextSize(
-                    13 * sy()
-            );
-
-            paint.setColor(
-                    Color.LTGRAY
-            );
-
-            canvas.drawText(
-                    "‹ APPS",
-                    1245 * sx(),
-                    38 * sy(),
-                    paint
-            );
-
-            paint.setTextAlign(
-                    Paint.Align.LEFT
-            );
-
-            paint.setTextSize(
-                    12 * sy()
-            );
-
-            paint.setColor(
-                    Color.rgb(
-                            242,
-                            139,
-                            38
-                    )
-            );
-
-            canvas.drawText(
-                    "HMI BMW.G5.D.Q.F01 • MCU TsBMW.240709(W) • CAN YX-BMW-GD-2",
-                    25 * sx(),
-                    78 * sy(),
-                    paint
-            );
-
-            float top =
-                    100f - diagScroll;
-
-            float rowH =
-                    58f;
-
-            for (
-                    int i = 0;
-                    i < diagnostics.size();
-                    i++
-            ) {
-
-                float y =
-                        top +
-                        i * rowH;
-
-                if (
-                        y + rowH < 90 ||
-                        y > 480
-                ) {
-                    continue;
+            if(e.getAction()==MotionEvent.ACTION_MOVE){
+                float dx=x-downX, dy=y-downY;
+                if(page==1 && Math.abs(dy)>Math.abs(dx) && Math.abs(dy)>8){
+                    vertical=true;
+                    appScroll += lastY-y;
+                    float content=((apps.size()+5)/6)*92f;
+                    float max=Math.max(0,content-400f);
+                    if(appScroll<0) appScroll=0;
+                    if(appScroll>max) appScroll=max;
+                    lastY=y; invalidate();
                 }
-
-                paint.setColor(
-                        Color.rgb(
-                                20,
-                                23,
-                                25
-                        )
-                );
-
-                canvas.drawRoundRect(
-                        18 * sx(),
-                        y * sy(),
-                        1260 * sx(),
-                        (y + 48) * sy(),
-                        7 * sx(),
-                        7 * sy(),
-                        paint
-                );
-
-                paint.setTextAlign(
-                        Paint.Align.LEFT
-                );
-
-                paint.setColor(
-                        Color.WHITE
-                );
-
-                paint.setTextSize(
-                        14 * sy()
-                );
-
-                canvas.drawText(
-                        diagnostics.get(i).line1,
-                        32 * sx(),
-                        (y + 20) * sy(),
-                        paint
-                );
-
-                paint.setColor(
-                        Color.GRAY
-                );
-
-                paint.setTextSize(
-                        11 * sy()
-                );
-
-                canvas.drawText(
-                        diagnostics.get(i).line2,
-                        32 * sx(),
-                        (y + 39) * sy(),
-                        paint
-                );
-            }
-        }
-
-        @Override
-        public boolean onTouchEvent(
-                MotionEvent event
-        ) {
-
-            float x =
-                    event.getX() /
-                            sx();
-
-            float y =
-                    event.getY() /
-                            sy();
-
-            if (
-                    event.getAction()
-                            ==
-                    MotionEvent.ACTION_DOWN
-            ) {
-
-                downX = x;
-                downY = y;
-                lastY = y;
-
-                verticalScrolling =
-                        false;
-
                 return true;
             }
 
-            if (
-                    event.getAction()
-                            ==
-                    MotionEvent.ACTION_MOVE
-            ) {
+            if(e.getAction()==MotionEvent.ACTION_UP){
+                float dx=x-downX, dy=y-downY;
 
-                float dx =
-                        x - downX;
-
-                float dy =
-                        y - downY;
-
-                if (
-                        page == 1
-                        &&
-                        Math.abs(dy)
-                                >
-                        Math.abs(dx)
-                        &&
-                        Math.abs(dy) > 8
-                ) {
-
-                    verticalScrolling =
-                            true;
-
-                    appScroll +=
-                            lastY - y;
-
-                    float contentHeight =
-                            ((apps.size() + 4) / 5)
-                                    * 118f;
-
-                    float maxScroll =
-                            Math.max(
-                                    0,
-                                    contentHeight
-                                            - 390f
-                            );
-
-                    if (appScroll < 0) {
-                        appScroll = 0;
+                if(!vertical && Math.abs(dx)>120 && Math.abs(dx)>Math.abs(dy)){
+                    if(dx<0){
+                        if(page==0) page=1;
+                        else if(page==1) page=2;
+                    }else{
+                        if(page==2) page=1;
+                        else if(page==1) page=0;
                     }
-
-                    if (appScroll > maxScroll) {
-                        appScroll = maxScroll;
-                    }
-
-                    lastY = y;
-
-                    invalidate();
+                    invalidate(); return true;
                 }
 
-                if (
-                        page == 2
-                        &&
-                        Math.abs(dy)
-                                >
-                        Math.abs(dx)
-                        &&
-                        Math.abs(dy) > 8
-                ) {
-
-                    verticalScrolling =
-                            true;
-
-                    diagScroll +=
-                            lastY - y;
-
-                    float contentHeight =
-                            diagnostics.size()
-                                    * 58f;
-
-                    float maxScroll =
-                            Math.max(
-                                    0,
-                                    contentHeight
-                                            - 370f
-                            );
-
-                    if (diagScroll < 0) {
-                        diagScroll = 0;
-                    }
-
-                    if (diagScroll > maxScroll) {
-                        diagScroll = maxScroll;
-                    }
-
-                    lastY = y;
-
-                    invalidate();
-                }
-
-                return true;
-            }
-
-            if (
-                    event.getAction()
-                            ==
-                    MotionEvent.ACTION_UP
-            ) {
-
-                float dx =
-                        x - downX;
-
-                float dy =
-                        y - downY;
-
-                // SWIPE PAGINI
-                if (
-                        !verticalScrolling
-                        &&
-                        Math.abs(dx) > 130
-                        &&
-                        Math.abs(dx) > Math.abs(dy)
-                ) {
-
-                    if (dx < 0) {
-                        if (page < 2) {
-                            page++;
-                        }
-                    } else {
-                        if (page > 0) {
-                            page--;
-                        }
-                    }
-
-                    invalidate();
-
-                    return true;
-                }
-
-                if (page == 0) {
-
-                    if (
-                            x < 210
-                            &&
-                            y > 58
-                            &&
-                            y < 430
-                    ) {
-                        openNavigation();
-                        return true;
-                    }
-
-                    if (
-                            x >= 210
-                            &&
-                            x < 655
-                            &&
-                            y > 58
-                            &&
-                            y < 430
-                    ) {
-
-                        Toast.makeText(
-                                MainActivity.this,
-                                "BMW F01 2011 pre-LCI • DJ 10 SDS",
-                                Toast.LENGTH_SHORT
-                        ).show();
-
-                        return true;
-                    }
-
-                    if (
-                            x >= 655
-                            &&
-                            x < 860
-                            &&
-                            y > 58
-                            &&
-                            y < 430
-                    ) {
-                        openMedia();
-                        return true;
-                    }
-
-                    if (
-                            x >= 860
-                            &&
-                            x < 1070
-                            &&
-                            y > 58
-                            &&
-                            y < 430
-                    ) {
-                        openPhone();
-                        return true;
-                    }
-
-                    if (
-                            x >= 1070
-                            &&
-                            y > 58
-                            &&
-                            y < 430
-                    ) {
-                        openSettings();
-                        return true;
-                    }
-
-                    if (
-                            x > 1110
-                            &&
-                            y > 420
-                    ) {
-                        page = 1;
-                        invalidate();
-                        return true;
-                    }
-
-                } else if (page == 1) {
-
-                    if (
-                            x > 1080
-                            &&
-                            y < 65
-                    ) {
-                        page = 2;
-                        invalidate();
-                        return true;
-                    }
-
-                    int columns = 5;
-
-                    float cellWidth =
-                            1280f /
-                            columns;
-
-                    float adjustedY =
-                            y
-                            - 70f
-                            + appScroll;
-
-                    if (
-                            adjustedY >= 0
-                    ) {
-
-                        int column =
-                                (int)
-                                        (x /
-                                         cellWidth);
-
-                        int row =
-                                (int)
-                                        (adjustedY /
-                                         118f);
-
-                        int index =
-                                row
-                                * columns
-                                + column;
-
-                        if (
-                                index >= 0
-                                &&
-                                index < apps.size()
-                        ) {
-
-                            try {
-
-                                startActivity(
-                                        apps.get(index)
-                                                .intent
-                                );
-
-                            } catch (Exception e) {
-
-                                Toast.makeText(
-                                        MainActivity.this,
-                                        "Nu pot porni aplicatia",
-                                        Toast.LENGTH_SHORT
-                                ).show();
-                            }
-
+                if(page==0){
+                    if(x>=30 && x<=430 && y>=40 && y<=410){
+                        int idx=(int)((y-42)/42f);
+                        if(idx>=0 && idx<menu.length){
+                            if(idx==selected) openSelected();
+                            else { selected=idx; invalidate(); }
                             return true;
                         }
                     }
+                    if(x>1110 && y>420){ page=2; invalidate(); return true; }
+                }else if(page==1){
+                    if(x>1080 && y<60){ page=0; invalidate(); return true; }
 
-                } else {
-
-                    if (
-                            x > 1080
-                            &&
-                            y < 65
-                    ) {
-                        page = 1;
-                        invalidate();
-                        return true;
+                    int cols=6;
+                    float cellW=1280f/cols;
+                    float ay=y-62f+appScroll;
+                    if(ay>=0){
+                        int col=(int)(x/cellW);
+                        int row=(int)(ay/92f);
+                        int idx=row*cols+col;
+                        if(idx>=0 && idx<apps.size()){
+                            try{ startActivity(apps.get(idx).intent); }
+                            catch(Exception ex){ toast("Nu pot porni aplicatia"); }
+                            return true;
+                        }
                     }
+                }else{
+                    if(x>1080 && y<60){ page=0; invalidate(); return true; }
                 }
             }
-
             return true;
         }
     }
