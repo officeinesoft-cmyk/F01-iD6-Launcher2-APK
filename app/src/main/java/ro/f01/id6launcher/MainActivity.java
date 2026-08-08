@@ -2,6 +2,7 @@ package ro.f01.id6launcher;
 
 import android.app.Activity;
 import android.os.Bundle;
+import android.os.Handler;
 import android.content.*;
 import android.content.pm.*;
 import android.graphics.*;
@@ -11,6 +12,7 @@ import android.provider.Settings;
 import android.view.*;
 import android.widget.Toast;
 
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 public class MainActivity extends Activity {
@@ -35,10 +37,7 @@ public class MainActivity extends Activity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-
-        if (hasFocus) {
-            hideSystemUi();
-        }
+        if (hasFocus) hideSystemUi();
     }
 
     void hideSystemUi() {
@@ -53,7 +52,6 @@ public class MainActivity extends Activity {
     }
 
     void openNavigation() {
-
         PackageManager pm = getPackageManager();
 
         String[] packages = {
@@ -62,33 +60,21 @@ public class MainActivity extends Activity {
         };
 
         for (String pkg : packages) {
-
             try {
-
-                Intent intent =
-                        pm.getLaunchIntentForPackage(pkg);
-
+                Intent intent = pm.getLaunchIntentForPackage(pkg);
                 if (intent != null) {
-
                     startActivity(intent);
                     return;
                 }
-
-            } catch (Exception ignored) {
-            }
+            } catch (Exception ignored) {}
         }
 
         try {
-
-            Intent geo = new Intent(
+            startActivity(new Intent(
                     Intent.ACTION_VIEW,
                     Uri.parse("geo:0,0?q=Bucharest")
-            );
-
-            startActivity(geo);
-
+            ));
         } catch (Exception e) {
-
             Toast.makeText(
                     this,
                     "Nu am gasit aplicatia de navigatie",
@@ -98,7 +84,6 @@ public class MainActivity extends Activity {
     }
 
     void openMedia() {
-
         PackageManager pm = getPackageManager();
 
         String[] packages = {
@@ -108,31 +93,18 @@ public class MainActivity extends Activity {
         };
 
         for (String pkg : packages) {
-
             try {
-
-                Intent intent =
-                        pm.getLaunchIntentForPackage(pkg);
-
+                Intent intent = pm.getLaunchIntentForPackage(pkg);
                 if (intent != null) {
-
                     startActivity(intent);
                     return;
                 }
-
-            } catch (Exception ignored) {
-            }
+            } catch (Exception ignored) {}
         }
 
         try {
-
-            Intent music =
-                    new Intent("android.intent.action.MUSIC_PLAYER");
-
-            startActivity(music);
-
+            startActivity(new Intent("android.intent.action.MUSIC_PLAYER"));
         } catch (Exception e) {
-
             Toast.makeText(
                     this,
                     "Nu am gasit playerul audio",
@@ -142,15 +114,9 @@ public class MainActivity extends Activity {
     }
 
     void openPhone() {
-
         try {
-
-            startActivity(
-                    new Intent(Intent.ACTION_DIAL)
-            );
-
+            startActivity(new Intent(Intent.ACTION_DIAL));
         } catch (Exception e) {
-
             Toast.makeText(
                     this,
                     "Telefon indisponibil",
@@ -160,74 +126,205 @@ public class MainActivity extends Activity {
     }
 
     void openSettings() {
-
         try {
-
-            startActivity(
-                    new Intent(Settings.ACTION_SETTINGS)
-            );
-
-        } catch (Exception ignored) {
-        }
+            startActivity(new Intent(Settings.ACTION_SETTINGS));
+        } catch (Exception ignored) {}
     }
 
     class AppEntry {
-
         String label;
         String packageName;
-
         Drawable icon;
-
         Intent intent;
+    }
+
+    class DiagnosticEntry {
+        String line1;
+        String line2;
+
+        DiagnosticEntry(String a, String b) {
+            line1 = a;
+            line2 = b;
+        }
     }
 
     class LauncherView extends View {
 
-        Paint paint =
-                new Paint(Paint.ANTI_ALIAS_FLAG);
-
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         Bitmap home;
-
-        ArrayList<AppEntry> apps =
-                new ArrayList<>();
-
-        int page = 0;
-
-        float downX;
-        float downY;
-        float lastY;
-
-        float appScroll = 0;
-
-        boolean verticalScrolling = false;
 
         final float BASE_W = 1280f;
         final float BASE_H = 480f;
 
-        LauncherView(Context context) {
+        // 0=HOME, 1=APPS, 2=DIAGNOSTIC
+        int page = 0;
 
+        ArrayList<AppEntry> apps = new ArrayList<>();
+        ArrayList<DiagnosticEntry> diagnostics = new ArrayList<>();
+
+        float downX, downY, lastY;
+        float appScroll = 0f;
+        float diagScroll = 0f;
+        boolean verticalScrolling = false;
+
+        Handler clockHandler = new Handler();
+
+        Runnable clockTick = new Runnable() {
+            @Override
+            public void run() {
+                invalidate();
+                clockHandler.postDelayed(this, 1000);
+            }
+        };
+
+        LauncherView(Context context) {
             super(context);
+
+            BitmapDrawable drawable =
+                    (BitmapDrawable) getResources().getDrawable(
+                            R.drawable.home_screen
+                    );
+
+            home = drawable.getBitmap();
 
             setFocusable(true);
 
-            BitmapDrawable drawable =
-                    (BitmapDrawable)
-                            getResources().getDrawable(
-                                    R.drawable.home_screen
-                            );
-
-            home =
-                    drawable.getBitmap();
-
             loadApps();
+            scanDiagnosticPackages();
+
+            clockHandler.post(clockTick);
+        }
+
+        float sx() {
+            return getWidth() / BASE_W;
+        }
+
+        float sy() {
+            return getHeight() / BASE_H;
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            super.onDetachedFromWindow();
+            clockHandler.removeCallbacks(clockTick);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+
+            if (page == 0) {
+                drawHome(canvas);
+            } else if (page == 1) {
+                drawApps(canvas);
+            } else {
+                drawDiagnostics(canvas);
+            }
+        }
+
+        void drawHome(Canvas canvas) {
+
+            Rect source = new Rect(
+                    0, 0,
+                    home.getWidth(),
+                    home.getHeight()
+            );
+
+            Rect destination = new Rect(
+                    0, 0,
+                    getWidth(),
+                    getHeight()
+            );
+
+            canvas.drawBitmap(
+                    home,
+                    source,
+                    destination,
+                    paint
+            );
+
+            // OVERLAY REAL: ora si data din Android
+            Date now = new Date();
+
+            SimpleDateFormat timeFormat =
+                    new SimpleDateFormat(
+                            "HH:mm",
+                            Locale.getDefault()
+                    );
+
+            SimpleDateFormat dateFormat =
+                    new SimpleDateFormat(
+                            "EEE, dd.MM.yyyy",
+                            new Locale("ro", "RO")
+                    );
+
+            String time = timeFormat.format(now);
+            String date = dateFormat.format(now);
+
+            // fundal discret peste textul static din imagine
+            paint.setColor(Color.argb(215, 8, 10, 12));
+            canvas.drawRoundRect(
+                    515 * sx(),
+                    4 * sy(),
+                    805 * sx(),
+                    55 * sy(),
+                    8 * sx(),
+                    8 * sy(),
+                    paint
+            );
+
+            paint.setColor(Color.WHITE);
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setTypeface(Typeface.create("sans", Typeface.NORMAL));
+
+            paint.setTextSize(27 * sy());
+            canvas.drawText(
+                    time,
+                    590 * sx(),
+                    37 * sy(),
+                    paint
+            );
+
+            paint.setTextSize(15 * sy());
+            paint.setColor(Color.LTGRAY);
+
+            canvas.drawText(
+                    date,
+                    710 * sx(),
+                    35 * sy(),
+                    paint
+            );
+
+            // CAN/CLIMA: nu inventam valori.
+            // Afisam doar starea de integrare pana identificam serviciul MCU.
+            paint.setTextAlign(Paint.Align.LEFT);
+            paint.setTextSize(11 * sy());
+            paint.setColor(Color.rgb(180, 185, 188));
+
+            canvas.drawText(
+                    "CAN: TsBMW / YX-BMW-GD-2 • diagnostic activ",
+                    22 * sx(),
+                    466 * sy(),
+                    paint
+            );
+
+            paint.setTextAlign(Paint.Align.RIGHT);
+            paint.setTextSize(14 * sy());
+            paint.setColor(Color.WHITE);
+
+            canvas.drawText(
+                    "APPS  ›",
+                    1255 * sx(),
+                    465 * sy(),
+                    paint
+            );
         }
 
         void loadApps() {
 
             apps.clear();
 
-            PackageManager pm =
-                    getPackageManager();
+            PackageManager pm = getPackageManager();
 
             Intent query =
                     new Intent(
@@ -248,13 +345,11 @@ public class MainActivity extends Activity {
             Collections.sort(
                     list,
                     new Comparator<ResolveInfo>() {
-
                         @Override
                         public int compare(
                                 ResolveInfo a,
                                 ResolveInfo b
                         ) {
-
                             return a.loadLabel(pm)
                                     .toString()
                                     .compareToIgnoreCase(
@@ -270,11 +365,7 @@ public class MainActivity extends Activity {
                 String pkg =
                         ri.activityInfo.packageName;
 
-                if (
-                        pkg.equals(
-                                getPackageName()
-                        )
-                ) {
+                if (pkg.equals(getPackageName())) {
                     continue;
                 }
 
@@ -315,85 +406,211 @@ public class MainActivity extends Activity {
             }
         }
 
-        float sx() {
+        void scanDiagnosticPackages() {
 
-            return getWidth() /
-                    BASE_W;
-        }
+            diagnostics.clear();
 
-        float sy() {
+            PackageManager pm = getPackageManager();
 
-            return getHeight() /
-                    BASE_H;
-        }
+            List<PackageInfo> packages;
 
-        @Override
-        protected void onDraw(
-                Canvas canvas
-        ) {
+            try {
+                packages =
+                        pm.getInstalledPackages(
+                                PackageManager.GET_ACTIVITIES |
+                                PackageManager.GET_SERVICES |
+                                PackageManager.GET_RECEIVERS
+                        );
+            } catch (Exception e) {
+                diagnostics.add(
+                        new DiagnosticEntry(
+                                "Diagnostic error",
+                                e.toString()
+                        )
+                );
+                return;
+            }
 
-            super.onDraw(canvas);
+            String[] keywords = {
+                    "can",
+                    "mcu",
+                    "car",
+                    "vehicle",
+                    "auto",
+                    "bmw",
+                    "ts",
+                    "yx",
+                    "hmi",
+                    "media",
+                    "bluetooth",
+                    "bt"
+            };
 
-            if (page == 0) {
+            for (PackageInfo pi : packages) {
 
-                drawHome(canvas);
+                String pkg =
+                        pi.packageName == null
+                                ? ""
+                                : pi.packageName;
 
-            } else {
+                String label = "";
 
-                drawApps(canvas);
+                try {
+                    ApplicationInfo ai =
+                            pm.getApplicationInfo(
+                                    pkg,
+                                    0
+                            );
+
+                    label =
+                            pm.getApplicationLabel(ai)
+                                    .toString();
+
+                } catch (Exception ignored) {}
+
+                String haystack =
+                        (pkg + " " + label)
+                                .toLowerCase(Locale.US);
+
+                boolean match = false;
+
+                for (String keyword : keywords) {
+
+                    if (haystack.contains(keyword)) {
+                        match = true;
+                        break;
+                    }
+                }
+
+                if (!match) {
+                    continue;
+                }
+
+                String version =
+                        pi.versionName == null
+                                ? ""
+                                : pi.versionName;
+
+                diagnostics.add(
+                        new DiagnosticEntry(
+                                label.length() == 0
+                                        ? pkg
+                                        : label,
+                                pkg + "   v" + version
+                        )
+                );
+
+                if (pi.services != null) {
+                    for (ServiceInfo si : pi.services) {
+
+                        String name =
+                                si.name == null
+                                        ? ""
+                                        : si.name;
+
+                        String lower =
+                                name.toLowerCase(Locale.US);
+
+                        if (
+                                lower.contains("can") ||
+                                lower.contains("mcu") ||
+                                lower.contains("car") ||
+                                lower.contains("vehicle") ||
+                                lower.contains("bmw")
+                        ) {
+                            diagnostics.add(
+                                    new DiagnosticEntry(
+                                            "SERVICE",
+                                            name
+                                    )
+                            );
+                        }
+                    }
+                }
+
+                if (pi.receivers != null) {
+                    for (ActivityInfo ri : pi.receivers) {
+
+                        String name =
+                                ri.name == null
+                                        ? ""
+                                        : ri.name;
+
+                        String lower =
+                                name.toLowerCase(Locale.US);
+
+                        if (
+                                lower.contains("can") ||
+                                lower.contains("mcu") ||
+                                lower.contains("car") ||
+                                lower.contains("vehicle") ||
+                                lower.contains("bmw")
+                        ) {
+                            diagnostics.add(
+                                    new DiagnosticEntry(
+                                            "RECEIVER",
+                                            name
+                                    )
+                            );
+                        }
+                    }
+                }
+            }
+
+            if (diagnostics.size() == 0) {
+
+                diagnostics.add(
+                        new DiagnosticEntry(
+                                "Nu am gasit candidati evidenti",
+                                "TsBMW/YX poate folosi un serviciu cu nume generic."
+                        )
+                );
             }
         }
 
-        void drawHome(
-                Canvas canvas
+        Bitmap drawableToBitmap(
+                Drawable drawable,
+                int width,
+                int height
         ) {
 
-            Rect source =
-                    new Rect(
-                            0,
-                            0,
-                            home.getWidth(),
-                            home.getHeight()
+            if (drawable instanceof BitmapDrawable) {
+
+                Bitmap bitmap =
+                        ((BitmapDrawable) drawable)
+                                .getBitmap();
+
+                return Bitmap.createScaledBitmap(
+                        bitmap,
+                        width,
+                        height,
+                        true
+                );
+            }
+
+            Bitmap bitmap =
+                    Bitmap.createBitmap(
+                            width,
+                            height,
+                            Bitmap.Config.ARGB_8888
                     );
 
-            Rect destination =
-                    new Rect(
-                            0,
-                            0,
-                            getWidth(),
-                            getHeight()
-                    );
+            Canvas canvas =
+                    new Canvas(bitmap);
 
-            canvas.drawBitmap(
-                    home,
-                    source,
-                    destination,
-                    paint
+            drawable.setBounds(
+                    0,
+                    0,
+                    width,
+                    height
             );
 
-            paint.setColor(
-                    Color.WHITE
-            );
+            drawable.draw(canvas);
 
-            paint.setTextSize(
-                    16 * sy()
-            );
-
-            paint.setTextAlign(
-                    Paint.Align.RIGHT
-            );
-
-            canvas.drawText(
-                    "APPS  ›",
-                    1260 * sx(),
-                    462 * sy(),
-                    paint
-            );
+            return bitmap;
         }
 
-        void drawApps(
-                Canvas canvas
-        ) {
+        void drawApps(Canvas canvas) {
 
             canvas.drawColor(
                     Color.rgb(
@@ -417,6 +634,13 @@ public class MainActivity extends Activity {
                     getWidth(),
                     58 * sy(),
                     paint
+            );
+
+            paint.setTypeface(
+                    Typeface.create(
+                            "sans",
+                            Typeface.NORMAL
+                    )
             );
 
             paint.setTextAlign(
@@ -443,7 +667,7 @@ public class MainActivity extends Activity {
             );
 
             paint.setTextSize(
-                    15 * sy()
+                    14 * sy()
             );
 
             paint.setColor(
@@ -451,7 +675,7 @@ public class MainActivity extends Activity {
             );
 
             canvas.drawText(
-                    "‹  HOME",
+                    "‹ HOME     DIAGNOSTIC ›",
                     1245 * sx(),
                     38 * sy(),
                     paint
@@ -502,7 +726,6 @@ public class MainActivity extends Activity {
                         bottom < 60 ||
                         itemTop > 480
                 ) {
-
                     continue;
                 }
 
@@ -552,7 +775,7 @@ public class MainActivity extends Activity {
                                     54
                             );
 
-                    Rect iconSource =
+                    Rect src =
                             new Rect(
                                     0,
                                     0,
@@ -560,7 +783,7 @@ public class MainActivity extends Activity {
                                     icon.getHeight()
                             );
 
-                    RectF iconDestination =
+                    RectF dst =
                             new RectF(
                                     (left + 18) * sx(),
                                     (itemTop + 17) * sy(),
@@ -570,13 +793,12 @@ public class MainActivity extends Activity {
 
                     canvas.drawBitmap(
                             icon,
-                            iconSource,
-                            iconDestination,
+                            src,
+                            dst,
                             paint
                     );
 
-                } catch (Exception ignored) {
-                }
+                } catch (Exception ignored) {}
 
                 paint.setTextAlign(
                         Paint.Align.LEFT
@@ -596,7 +818,6 @@ public class MainActivity extends Activity {
                 if (
                         label.length() > 19
                 ) {
-
                     label =
                             label.substring(
                                     0,
@@ -628,53 +849,175 @@ public class MainActivity extends Activity {
             }
         }
 
-        Bitmap drawableToBitmap(
-                Drawable drawable,
-                int width,
-                int height
-        ) {
+        void drawDiagnostics(Canvas canvas) {
 
-            if (
-                    drawable
-                            instanceof BitmapDrawable
+            canvas.drawColor(
+                    Color.rgb(
+                            7,
+                            9,
+                            11
+                    )
+            );
+
+            paint.setColor(
+                    Color.rgb(
+                            24,
+                            27,
+                            29
+                    )
+            );
+
+            canvas.drawRect(
+                    0,
+                    0,
+                    getWidth(),
+                    58 * sy(),
+                    paint
+            );
+
+            paint.setTextAlign(
+                    Paint.Align.LEFT
+            );
+
+            paint.setTypeface(
+                    Typeface.create(
+                            "sans",
+                            Typeface.NORMAL
+                    )
+            );
+
+            paint.setTextSize(
+                    23 * sy()
+            );
+
+            paint.setColor(
+                    Color.WHITE
+            );
+
+            canvas.drawText(
+                    "CAN / MCU DIAGNOSTIC",
+                    25 * sx(),
+                    38 * sy(),
+                    paint
+            );
+
+            paint.setTextAlign(
+                    Paint.Align.RIGHT
+            );
+
+            paint.setTextSize(
+                    13 * sy()
+            );
+
+            paint.setColor(
+                    Color.LTGRAY
+            );
+
+            canvas.drawText(
+                    "‹ APPS",
+                    1245 * sx(),
+                    38 * sy(),
+                    paint
+            );
+
+            paint.setTextAlign(
+                    Paint.Align.LEFT
+            );
+
+            paint.setTextSize(
+                    12 * sy()
+            );
+
+            paint.setColor(
+                    Color.rgb(
+                            242,
+                            139,
+                            38
+                    )
+            );
+
+            canvas.drawText(
+                    "HMI BMW.G5.D.Q.F01 • MCU TsBMW.240709(W) • CAN YX-BMW-GD-2",
+                    25 * sx(),
+                    78 * sy(),
+                    paint
+            );
+
+            float top =
+                    100f - diagScroll;
+
+            float rowH =
+                    58f;
+
+            for (
+                    int i = 0;
+                    i < diagnostics.size();
+                    i++
             ) {
 
-                Bitmap bitmap =
-                        ((BitmapDrawable)
-                                drawable)
-                                .getBitmap();
+                float y =
+                        top +
+                        i * rowH;
 
-                return Bitmap
-                        .createScaledBitmap(
-                                bitmap,
-                                width,
-                                height,
-                                true
-                        );
+                if (
+                        y + rowH < 90 ||
+                        y > 480
+                ) {
+                    continue;
+                }
+
+                paint.setColor(
+                        Color.rgb(
+                                20,
+                                23,
+                                25
+                        )
+                );
+
+                canvas.drawRoundRect(
+                        18 * sx(),
+                        y * sy(),
+                        1260 * sx(),
+                        (y + 48) * sy(),
+                        7 * sx(),
+                        7 * sy(),
+                        paint
+                );
+
+                paint.setTextAlign(
+                        Paint.Align.LEFT
+                );
+
+                paint.setColor(
+                        Color.WHITE
+                );
+
+                paint.setTextSize(
+                        14 * sy()
+                );
+
+                canvas.drawText(
+                        diagnostics.get(i).line1,
+                        32 * sx(),
+                        (y + 20) * sy(),
+                        paint
+                );
+
+                paint.setColor(
+                        Color.GRAY
+                );
+
+                paint.setTextSize(
+                        11 * sy()
+                );
+
+                canvas.drawText(
+                        diagnostics.get(i).line2,
+                        32 * sx(),
+                        (y + 39) * sy(),
+                        paint
+                );
             }
-
-            Bitmap bitmap =
-                    Bitmap.createBitmap(
-                            width,
-                            height,
-                            Bitmap.Config.ARGB_8888
-                    );
-
-            Canvas canvas =
-                    new Canvas(bitmap);
-
-            drawable.setBounds(
-                    0,
-                    0,
-                    width,
-                    height
-            );
-
-            drawable.draw(
-                    canvas
-            );
-
-            return bitmap;
         }
 
         @Override
@@ -698,7 +1041,6 @@ public class MainActivity extends Activity {
 
                 downX = x;
                 downY = y;
-
                 lastY = y;
 
                 verticalScrolling =
@@ -746,20 +1088,52 @@ public class MainActivity extends Activity {
                                             - 390f
                             );
 
-                    if (
-                            appScroll < 0
-                    ) {
-
+                    if (appScroll < 0) {
                         appScroll = 0;
                     }
 
-                    if (
-                            appScroll >
-                            maxScroll
-                    ) {
+                    if (appScroll > maxScroll) {
+                        appScroll = maxScroll;
+                    }
 
-                        appScroll =
-                                maxScroll;
+                    lastY = y;
+
+                    invalidate();
+                }
+
+                if (
+                        page == 2
+                        &&
+                        Math.abs(dy)
+                                >
+                        Math.abs(dx)
+                        &&
+                        Math.abs(dy) > 8
+                ) {
+
+                    verticalScrolling =
+                            true;
+
+                    diagScroll +=
+                            lastY - y;
+
+                    float contentHeight =
+                            diagnostics.size()
+                                    * 58f;
+
+                    float maxScroll =
+                            Math.max(
+                                    0,
+                                    contentHeight
+                                            - 370f
+                            );
+
+                    if (diagScroll < 0) {
+                        diagScroll = 0;
+                    }
+
+                    if (diagScroll > maxScroll) {
+                        diagScroll = maxScroll;
                     }
 
                     lastY = y;
@@ -782,33 +1156,23 @@ public class MainActivity extends Activity {
                 float dy =
                         y - downY;
 
+                // SWIPE PAGINI
                 if (
                         !verticalScrolling
                         &&
-                        Math.abs(dx)
-                                > 130
+                        Math.abs(dx) > 130
                         &&
-                        Math.abs(dx)
-                                >
-                        Math.abs(dy)
+                        Math.abs(dx) > Math.abs(dy)
                 ) {
 
-                    if (
-                            dx < 0
-                            &&
-                            page == 0
-                    ) {
-
-                        page = 1;
-                    }
-
-                    else if (
-                            dx > 0
-                            &&
-                            page == 1
-                    ) {
-
-                        page = 0;
+                    if (dx < 0) {
+                        if (page < 2) {
+                            page++;
+                        }
+                    } else {
+                        if (page > 0) {
+                            page--;
+                        }
                     }
 
                     invalidate();
@@ -816,9 +1180,7 @@ public class MainActivity extends Activity {
                     return true;
                 }
 
-                if (
-                        page == 0
-                ) {
+                if (page == 0) {
 
                     if (
                             x < 210
@@ -827,9 +1189,7 @@ public class MainActivity extends Activity {
                             &&
                             y < 430
                     ) {
-
                         openNavigation();
-
                         return true;
                     }
 
@@ -861,9 +1221,7 @@ public class MainActivity extends Activity {
                             &&
                             y < 430
                     ) {
-
                         openMedia();
-
                         return true;
                     }
 
@@ -876,9 +1234,7 @@ public class MainActivity extends Activity {
                             &&
                             y < 430
                     ) {
-
                         openPhone();
-
                         return true;
                     }
 
@@ -889,37 +1245,29 @@ public class MainActivity extends Activity {
                             &&
                             y < 430
                     ) {
-
                         openSettings();
-
                         return true;
                     }
 
                     if (
-                            x > 1120
+                            x > 1110
                             &&
                             y > 420
                     ) {
-
                         page = 1;
-
                         invalidate();
-
                         return true;
                     }
 
-                } else {
+                } else if (page == 1) {
 
                     if (
                             x > 1080
                             &&
                             y < 65
                     ) {
-
-                        page = 0;
-
+                        page = 2;
                         invalidate();
-
                         return true;
                     }
 
@@ -956,9 +1304,7 @@ public class MainActivity extends Activity {
                         if (
                                 index >= 0
                                 &&
-                                index
-                                <
-                                apps.size()
+                                index < apps.size()
                         ) {
 
                             try {
@@ -979,6 +1325,18 @@ public class MainActivity extends Activity {
 
                             return true;
                         }
+                    }
+
+                } else {
+
+                    if (
+                            x > 1080
+                            &&
+                            y < 65
+                    ) {
+                        page = 1;
+                        invalidate();
+                        return true;
                     }
                 }
             }
