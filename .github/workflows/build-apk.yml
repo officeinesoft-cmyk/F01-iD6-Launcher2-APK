@@ -1,4 +1,4 @@
-name: Build F01 iD6 APK
+name: Build F01 iD6 APK V2
 
 on:
   workflow_dispatch:
@@ -26,10 +26,10 @@ jobs:
         run: gradle assembleDebug
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk F01_iD6_Launcher_1920x720.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk F01_iD6_Launcher_V2_1280x480.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: F01-iD6-Launcher-APK
-          path: F01_iD6_Launcher_1920x720.apk
+          name: F01-iD6-Launcher-V2-APK
+          path: F01_iD6_Launcher_V2_1280x480.apk
