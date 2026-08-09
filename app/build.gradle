@@ -10,7 +10,7 @@ android {
         applicationId 'ro.f01.id6launcher'
         minSdk 23
         targetSdk 28
-        versionCode 10
-        versionName '8.0'
+        versionCode 11
+        versionName '9.0'
     }
 }
