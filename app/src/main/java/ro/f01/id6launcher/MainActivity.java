@@ -11,74 +11,114 @@ import android.net.Uri;
 import android.provider.Settings;
 import android.view.*;
 import android.widget.Toast;
+
 import java.text.SimpleDateFormat;
 import java.util.*;
 
 public class MainActivity extends Activity {
 
-    NbtView view;
+    CustomView view;
 
-    @Override public void onCreate(Bundle b) {
+    @Override
+    public void onCreate(Bundle b) {
         super.onCreate(b);
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                WindowManager.LayoutParams.FLAG_FULLSCREEN);
+
+        getWindow().setFlags(
+                WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                WindowManager.LayoutParams.FLAG_FULLSCREEN
+        );
+
         hideBars();
-        view = new NbtView(this);
+
+        view = new CustomView(this);
         setContentView(view);
     }
 
-    @Override public void onWindowFocusChanged(boolean f) {
-        super.onWindowFocusChanged(f);
-        if (f) hideBars();
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) hideBars();
     }
 
-    void hideBars() {
+    private void hideBars() {
         getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_FULLSCREEN |
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
                 View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION |
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        );
     }
 
-    @Override public boolean dispatchKeyEvent(KeyEvent e) {
-        if (view != null && view.handleKey(e)) return true;
-        return super.dispatchKeyEvent(e);
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (view != null && view.handleKey(event)) {
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
     }
 
-    void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_SHORT).show(); }
+    private void toast(String text) {
+        Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
+    }
 
-    void openFirst(String[] pkgs, Intent fallback) {
+    private void openFirstAvailable(String[] packages, Intent fallback) {
         PackageManager pm = getPackageManager();
-        for (String pkg : pkgs) {
+
+        for (String pkg : packages) {
             try {
-                Intent i = pm.getLaunchIntentForPackage(pkg);
-                if (i != null) { startActivity(i); return; }
+                Intent intent = pm.getLaunchIntentForPackage(pkg);
+                if (intent != null) {
+                    startActivity(intent);
+                    return;
+                }
             } catch (Exception ignored) {}
         }
-        try { startActivity(fallback); }
-        catch (Exception e) { toast("Aplicatia nu este disponibila"); }
+
+        try {
+            startActivity(fallback);
+        } catch (Exception e) {
+            toast("Aplicatia nu este disponibila");
+        }
     }
 
-    void openNavigation() {
-        openFirst(new String[]{"com.waze","com.google.android.apps.maps"},
-                new Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=Bucharest")));
+    private void openNavigation() {
+        openFirstAvailable(
+                new String[]{
+                        "com.waze",
+                        "com.google.android.apps.maps"
+                },
+                new Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("geo:0,0?q=Bucharest")
+                )
+        );
     }
 
-    void openMedia() {
-        openFirst(new String[]{"com.spotify.music","com.google.android.apps.youtube.music","com.maxmpz.audioplayer"},
-                new Intent("android.intent.action.MUSIC_PLAYER"));
+    private void openMedia() {
+        openFirstAvailable(
+                new String[]{
+                        "com.spotify.music",
+                        "com.google.android.apps.youtube.music",
+                        "com.maxmpz.audioplayer"
+                },
+                new Intent("android.intent.action.MUSIC_PLAYER")
+        );
     }
 
-    void openPhone() {
-        try { startActivity(new Intent(Intent.ACTION_DIAL)); }
-        catch (Exception e) { toast("Telefon indisponibil"); }
+    private void openPhone() {
+        try {
+            startActivity(new Intent(Intent.ACTION_DIAL));
+        } catch (Exception e) {
+            toast("Telefon indisponibil");
+        }
     }
 
-    void openSettings() {
-        try { startActivity(new Intent(Settings.ACTION_SETTINGS)); }
-        catch (Exception ignored) {}
+    private void openSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_SETTINGS));
+        } catch (Exception ignored) {}
     }
 
     class AppEntry {
@@ -87,148 +127,450 @@ public class MainActivity extends Activity {
         Intent intent;
     }
 
-    class NbtView extends View {
-        final float BW=1280f, BH=480f;
-        Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
-        Bitmap home;
-        Handler handler=new Handler();
+    class CustomView extends View {
 
-        String[] menu={
-                "CD/Multimedia","Radio","Telephone","Navigation","Office",
-                "ConnectedDrive","Vehicle information","Settings","Apps"
+        final float BASE_W = 1280f;
+        final float BASE_H = 480f;
+
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Bitmap home;
+
+        Handler handler = new Handler();
+
+        String[] menu = {
+                "Navigation",
+                "Media/Multimedia",
+                "Telephone",
+                "Vehicle",
+                "Apps",
+                "Settings"
         };
 
-        int selected=0;
-        int page=0; // 0 Home, 1 Apps
-        ArrayList<AppEntry> apps=new ArrayList<>();
+        int selected = 0;
+        int page = 0; // 0 = HOME, 1 = APPS
 
-        float appScroll=0f, downX, downY, lastY;
-        boolean vertical=false;
+        ArrayList<AppEntry> apps = new ArrayList<>();
 
-        Runnable tick=new Runnable() {
-            @Override public void run() {
+        float appScroll = 0f;
+        float downX, downY, lastY;
+        boolean verticalScrolling = false;
+
+        Runnable clockTick = new Runnable() {
+            @Override
+            public void run() {
                 invalidate();
-                handler.postDelayed(this,1000);
+                handler.postDelayed(this, 1000);
             }
         };
 
-        NbtView(Context c) {
-            super(c);
-            BitmapDrawable d=(BitmapDrawable)getResources().getDrawable(R.drawable.nbt_home_v8);
-            home=d.getBitmap();
+        CustomView(Context context) {
+            super(context);
+
+            BitmapDrawable drawable =
+                    (BitmapDrawable) getResources().getDrawable(
+                            R.drawable.custom_home_v9_final
+                    );
+
+            home = drawable.getBitmap();
+
             setFocusable(true);
             setFocusableInTouchMode(true);
             requestFocus();
+
             loadApps();
-            handler.post(tick);
+
+            handler.post(clockTick);
         }
 
-        @Override protected void onDetachedFromWindow() {
+        @Override
+        protected void onDetachedFromWindow() {
             super.onDetachedFromWindow();
-            handler.removeCallbacks(tick);
+            handler.removeCallbacks(clockTick);
         }
 
-        float sx(){ return getWidth()/BW; }
-        float sy(){ return getHeight()/BH; }
-
-        void fill(Canvas c,int color,float l,float t,float r,float b){
-            p.setStyle(Paint.Style.FILL);
-            p.setColor(color);
-            c.drawRect(l*sx(),t*sy(),r*sx(),b*sy(),p);
+        float sx() {
+            return getWidth() / BASE_W;
         }
 
-        void text(Canvas c,String s,float x,float y,float size,int color,Paint.Align a){
-            p.setStyle(Paint.Style.FILL);
-            p.setColor(color);
-            p.setTextAlign(a);
-            p.setTypeface(Typeface.create("sans",Typeface.NORMAL));
-            p.setTextSize(size*sy());
-            c.drawText(s,x*sx(),y*sy(),p);
+        float sy() {
+            return getHeight() / BASE_H;
         }
 
-        @Override protected void onDraw(Canvas c) {
-            super.onDraw(c);
-            if (page==0) drawHome(c); else drawApps(c);
+        void fill(
+                Canvas canvas,
+                int color,
+                float left,
+                float top,
+                float right,
+                float bottom
+        ) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(color);
+
+            canvas.drawRect(
+                    left * sx(),
+                    top * sy(),
+                    right * sx(),
+                    bottom * sy(),
+                    paint
+            );
         }
 
-        void drawHome(Canvas c) {
-            Rect src=new Rect(0,0,home.getWidth(),home.getHeight());
-            Rect dst=new Rect(0,0,getWidth(),getHeight());
-            c.drawBitmap(home,src,dst,p);
+        void text(
+                Canvas canvas,
+                String text,
+                float x,
+                float y,
+                float size,
+                int color,
+                Paint.Align align
+        ) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(color);
+            paint.setTextAlign(align);
+            paint.setTypeface(Typeface.create("sans", Typeface.NORMAL));
+            paint.setTextSize(size * sy());
 
-            // redraw only central menu so selection is live
-            fill(c,Color.argb(238,8,9,10),430,93,840,475);
+            canvas.drawText(
+                    text,
+                    x * sx(),
+                    y * sy(),
+                    paint
+            );
+        }
 
-            // real time/date
-            fill(c,Color.argb(235,8,9,10),855,15,1255,73);
-            String time=new SimpleDateFormat("HH:mm",Locale.getDefault()).format(new Date());
-            String date=new SimpleDateFormat("dd.MM.yyyy",new Locale("ro","RO")).format(new Date());
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
 
-            text(c,time,972,49,20,Color.WHITE,Paint.Align.RIGHT);
-            text(c,date,1232,49,16,Color.WHITE,Paint.Align.RIGHT);
+            if (page == 0) {
+                drawHome(canvas);
+            } else {
+                drawApps(canvas);
+            }
+        }
 
-            float top=126f,rowH=39f;
-            for(int i=0;i<menu.length;i++){
-                float y=top+i*rowH;
+        void drawHome(Canvas canvas) {
 
-                if(i==selected){
-                    fill(c,Color.argb(225,40,25,12),440,y-27,820,y+7);
-                    fill(c,Color.rgb(235,127,25),440,y-27,820,y-23);
+            Rect source = new Rect(
+                    0, 0,
+                    home.getWidth(),
+                    home.getHeight()
+            );
+
+            Rect destination = new Rect(
+                    0, 0,
+                    getWidth(),
+                    getHeight()
+            );
+
+            canvas.drawBitmap(
+                    home,
+                    source,
+                    destination,
+                    paint
+            );
+
+            // Real clock/date over the static mockup values.
+            fill(
+                    canvas,
+                    Color.argb(235, 5, 6, 7),
+                    595, 0,
+                    1280, 56
+            );
+
+            String time =
+                    new SimpleDateFormat(
+                            "HH:mm",
+                            Locale.getDefault()
+                    ).format(new Date());
+
+            String date =
+                    new SimpleDateFormat(
+                            "dd.MM.yyyy",
+                            new Locale("ro", "RO")
+                    ).format(new Date());
+
+            text(
+                    canvas,
+                    time,
+                    720,
+                    37,
+                    20,
+                    Color.WHITE,
+                    Paint.Align.RIGHT
+            );
+
+            text(
+                    canvas,
+                    date,
+                    1245,
+                    37,
+                    16,
+                    Color.WHITE,
+                    Paint.Align.RIGHT
+            );
+
+            /*
+             * Dynamic menu overlay.
+             * Keeps the approved visual background/car, while selection is live.
+             */
+            fill(
+                    canvas,
+                    Color.argb(220, 4, 5, 6),
+                    0, 72,
+                    325, 420
+            );
+
+            float top = 116f;
+            float rowHeight = 53f;
+
+            for (int i = 0; i < menu.length; i++) {
+
+                float y = top + i * rowHeight;
+
+                if (i == selected) {
+                    fill(
+                            canvas,
+                            Color.argb(225, 48, 27, 10),
+                            0,
+                            y - 35,
+                            315,
+                            y + 10
+                    );
+
+                    fill(
+                            canvas,
+                            Color.rgb(235, 127, 25),
+                            0,
+                            y - 35,
+                            5,
+                            y + 10
+                    );
                 }
 
-                text(c,menu[i],470,y,19,
-                        i==selected?Color.WHITE:Color.rgb(215,215,215),
-                        Paint.Align.LEFT);
+                String marker;
+
+                switch (i) {
+                    case 0:
+                        marker = "➤";
+                        break;
+                    case 1:
+                        marker = "♪";
+                        break;
+                    case 2:
+                        marker = "☎";
+                        break;
+                    case 3:
+                        marker = "●";
+                        break;
+                    case 4:
+                        marker = "▦";
+                        break;
+                    default:
+                        marker = "⚙";
+                        break;
+                }
+
+                text(
+                        canvas,
+                        marker,
+                        38,
+                        y,
+                        18,
+                        i == selected
+                                ? Color.rgb(235, 127, 25)
+                                : Color.WHITE,
+                        Paint.Align.CENTER
+                );
+
+                text(
+                        canvas,
+                        menu[i],
+                        75,
+                        y,
+                        18,
+                        i == selected
+                                ? Color.WHITE
+                                : Color.rgb(220, 220, 220),
+                        Paint.Align.LEFT
+                );
             }
 
-            fill(c,Color.argb(225,8,9,10),930,421,1270,478);
-            text(c,"iDrive rotire = selectie",1240,451,11,Color.LTGRAY,Paint.Align.RIGHT);
-            text(c,"Touch = OK",1240,469,11,Color.rgb(235,127,25),Paint.Align.RIGHT);
+            /*
+             * Live CAN data is not faked.
+             * Hide the mockup demo values and show placeholders until we read them.
+             */
+            fill(
+                    canvas,
+                    Color.argb(230, 6, 7, 8),
+                    1080, 75,
+                    1280, 395
+            );
+
+            text(
+                    canvas,
+                    "OUTSIDE",
+                    1110,
+                    112,
+                    12,
+                    Color.LTGRAY,
+                    Paint.Align.LEFT
+            );
+
+            text(
+                    canvas,
+                    "-- °C",
+                    1110,
+                    145,
+                    20,
+                    Color.WHITE,
+                    Paint.Align.LEFT
+            );
+
+            fill(
+                    canvas,
+                    Color.rgb(55, 55, 55),
+                    1100, 165,
+                    1260, 166
+            );
+
+            text(
+                    canvas,
+                    "FUEL RANGE",
+                    1110,
+                    205,
+                    12,
+                    Color.LTGRAY,
+                    Paint.Align.LEFT
+            );
+
+            text(
+                    canvas,
+                    "-- km",
+                    1110,
+                    238,
+                    20,
+                    Color.WHITE,
+                    Paint.Align.LEFT
+            );
+
+            fill(
+                    canvas,
+                    Color.rgb(55, 55, 55),
+                    1100, 258,
+                    1260, 259
+            );
+
+            text(
+                    canvas,
+                    "SPEED",
+                    1110,
+                    300,
+                    12,
+                    Color.LTGRAY,
+                    Paint.Align.LEFT
+            );
+
+            text(
+                    canvas,
+                    "-- km/h",
+                    1110,
+                    333,
+                    20,
+                    Color.WHITE,
+                    Paint.Align.LEFT
+            );
+
+            // Footer hints.
+            fill(
+                    canvas,
+                    Color.argb(220, 5, 6, 7),
+                    0, 420,
+                    1280, 480
+            );
+
+            text(
+                    canvas,
+                    "iDrive rotire = selectie",
+                    28,
+                    456,
+                    11,
+                    Color.LTGRAY,
+                    Paint.Align.LEFT
+            );
+
+            text(
+                    canvas,
+                    "Touch = OK",
+                    1240,
+                    456,
+                    11,
+                    Color.rgb(235, 127, 25),
+                    Paint.Align.RIGHT
+            );
         }
 
-        void moveSelection(int delta){
-            selected+=delta;
-            if(selected<0) selected=menu.length-1;
-            if(selected>=menu.length) selected=0;
-            invalidate();
-        }
+        /*
+         * IMPORTANT: diagnostic on this HU showed iDrive rotation arrives on KEY UP:
+         * 88 = MEDIA_PREVIOUS
+         * 87 = MEDIA_NEXT
+         */
+        boolean handleKey(KeyEvent event) {
 
-        void openSelected(){
-            switch(selected){
-                case 0:
-                case 1: openMedia(); break;
-                case 2: openPhone(); break;
-                case 3: openNavigation(); break;
-                case 4: toast("Office"); break;
-                case 5: toast("ConnectedDrive - integrare CAN in lucru"); break;
-                case 6: toast("BMW F01 2011 pre-LCI • DJ 10 SDS"); break;
-                case 7: openSettings(); break;
-                case 8: page=1; invalidate(); break;
+            if (event.getAction() != KeyEvent.ACTION_UP) {
+                return false;
             }
-        }
 
-        // HU diagnostic confirmed rotation arrives on KEY UP:
-        // 88 = MEDIA_PREVIOUS, 87 = MEDIA_NEXT
-        boolean handleKey(KeyEvent e){
-            if(e.getAction()!=KeyEvent.ACTION_UP) return false;
+            int code = event.getKeyCode();
 
-            int code=e.getKeyCode();
+            if (
+                    code == 88 ||
+                    code == KeyEvent.KEYCODE_MEDIA_PREVIOUS
+            ) {
 
-            if(code==88 || code==KeyEvent.KEYCODE_MEDIA_PREVIOUS){
-                if(page==0) moveSelection(-1);
-                else scrollApps(-1);
+                if (page == 0) {
+                    selected--;
+
+                    if (selected < 0) {
+                        selected = menu.length - 1;
+                    }
+
+                    invalidate();
+                } else {
+                    scrollApps(-1);
+                }
+
                 return true;
             }
 
-            if(code==87 || code==KeyEvent.KEYCODE_MEDIA_NEXT){
-                if(page==0) moveSelection(1);
-                else scrollApps(1);
+            if (
+                    code == 87 ||
+                    code == KeyEvent.KEYCODE_MEDIA_NEXT
+            ) {
+
+                if (page == 0) {
+                    selected++;
+
+                    if (selected >= menu.length) {
+                        selected = 0;
+                    }
+
+                    invalidate();
+                } else {
+                    scrollApps(1);
+                }
+
                 return true;
             }
 
-            if(code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_ESCAPE){
-                if(page!=0){
-                    page=0;
+            if (
+                    code == KeyEvent.KEYCODE_BACK ||
+                    code == KeyEvent.KEYCODE_ESCAPE
+            ) {
+
+                if (page != 0) {
+                    page = 0;
                     invalidate();
                     return true;
                 }
@@ -237,177 +579,490 @@ public class MainActivity extends Activity {
             return false;
         }
 
-        void scrollApps(int direction){
-            appScroll += direction*44f;
+        void openSelected() {
 
-            float content=((apps.size()+5)/6)*88f;
-            float max=Math.max(0,content-400f);
+            switch (selected) {
 
-            if(appScroll<0) appScroll=0;
-            if(appScroll>max) appScroll=max;
+                case 0:
+                    openNavigation();
+                    break;
+
+                case 1:
+                    openMedia();
+                    break;
+
+                case 2:
+                    openPhone();
+                    break;
+
+                case 3:
+                    toast("BMW F01 2011 • Cashmere Silver • DJ 10 SDS");
+                    break;
+
+                case 4:
+                    page = 1;
+                    invalidate();
+                    break;
+
+                case 5:
+                    openSettings();
+                    break;
+            }
+        }
+
+        void scrollApps(int direction) {
+
+            appScroll += direction * 44f;
+
+            float contentHeight =
+                    ((apps.size() + 4) / 5) * 105f;
+
+            float maxScroll =
+                    Math.max(
+                            0,
+                            contentHeight - 390f
+                    );
+
+            if (appScroll < 0) {
+                appScroll = 0;
+            }
+
+            if (appScroll > maxScroll) {
+                appScroll = maxScroll;
+            }
 
             invalidate();
         }
 
-        void loadApps(){
+        void loadApps() {
+
             apps.clear();
-            PackageManager pm=getPackageManager();
 
-            Intent q=new Intent(Intent.ACTION_MAIN,null);
-            q.addCategory(Intent.CATEGORY_LAUNCHER);
+            PackageManager pm =
+                    getPackageManager();
 
-            List<ResolveInfo> list=pm.queryIntentActivities(q,0);
+            Intent query =
+                    new Intent(
+                            Intent.ACTION_MAIN,
+                            null
+                    );
 
-            Collections.sort(list,new Comparator<ResolveInfo>(){
-                @Override public int compare(ResolveInfo a,ResolveInfo b){
-                    return a.loadLabel(pm).toString()
-                            .compareToIgnoreCase(b.loadLabel(pm).toString());
+            query.addCategory(
+                    Intent.CATEGORY_LAUNCHER
+            );
+
+            List<ResolveInfo> list =
+                    pm.queryIntentActivities(
+                            query,
+                            0
+                    );
+
+            Collections.sort(
+                    list,
+                    new Comparator<ResolveInfo>() {
+                        @Override
+                        public int compare(
+                                ResolveInfo a,
+                                ResolveInfo b
+                        ) {
+                            return a.loadLabel(pm)
+                                    .toString()
+                                    .compareToIgnoreCase(
+                                            b.loadLabel(pm)
+                                                    .toString()
+                                    );
+                        }
+                    }
+            );
+
+            for (ResolveInfo ri : list) {
+
+                if (
+                        ri.activityInfo.packageName
+                                .equals(
+                                        getPackageName()
+                                )
+                ) {
+                    continue;
                 }
-            });
 
-            for(ResolveInfo ri:list){
-                if(ri.activityInfo.packageName.equals(getPackageName())) continue;
+                AppEntry entry =
+                        new AppEntry();
 
-                AppEntry a=new AppEntry();
-                a.label=ri.loadLabel(pm).toString();
-                a.icon=ri.loadIcon(pm);
+                entry.label =
+                        ri.loadLabel(pm)
+                                .toString();
 
-                a.intent=new Intent(Intent.ACTION_MAIN);
-                a.intent.addCategory(Intent.CATEGORY_LAUNCHER);
-                a.intent.setComponent(new ComponentName(
-                        ri.activityInfo.packageName,
-                        ri.activityInfo.name));
-                a.intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                entry.icon =
+                        ri.loadIcon(pm);
 
-                apps.add(a);
+                entry.intent =
+                        new Intent(
+                                Intent.ACTION_MAIN
+                        );
+
+                entry.intent.addCategory(
+                        Intent.CATEGORY_LAUNCHER
+                );
+
+                entry.intent.setComponent(
+                        new ComponentName(
+                                ri.activityInfo.packageName,
+                                ri.activityInfo.name
+                        )
+                );
+
+                entry.intent.setFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK
+                );
+
+                apps.add(entry);
             }
         }
 
-        Bitmap iconBitmap(Drawable d,int w,int h){
-            if(d instanceof BitmapDrawable){
-                return Bitmap.createScaledBitmap(((BitmapDrawable)d).getBitmap(),w,h,true);
+        Bitmap iconBitmap(
+                Drawable drawable,
+                int width,
+                int height
+        ) {
+
+            if (
+                    drawable instanceof
+                    BitmapDrawable
+            ) {
+
+                return Bitmap.createScaledBitmap(
+                        ((BitmapDrawable) drawable)
+                                .getBitmap(),
+                        width,
+                        height,
+                        true
+                );
             }
 
-            Bitmap b=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
-            Canvas c=new Canvas(b);
-            d.setBounds(0,0,w,h);
-            d.draw(c);
-            return b;
+            Bitmap bitmap =
+                    Bitmap.createBitmap(
+                            width,
+                            height,
+                            Bitmap.Config.ARGB_8888
+                    );
+
+            Canvas canvas =
+                    new Canvas(bitmap);
+
+            drawable.setBounds(
+                    0, 0,
+                    width, height
+            );
+
+            drawable.draw(canvas);
+
+            return bitmap;
         }
 
-        void drawApps(Canvas c){
-            c.drawColor(Color.rgb(5,6,7));
+        void drawApps(Canvas canvas) {
 
-            fill(c,Color.rgb(17,19,21),0,0,1280,50);
-            text(c,"APPS",24,33,17,Color.WHITE,Paint.Align.LEFT);
-            text(c,"‹ HOME",1240,33,12,Color.LTGRAY,Paint.Align.RIGHT);
+            canvas.drawColor(
+                    Color.rgb(
+                            4, 5, 6
+                    )
+            );
 
-            int cols=6;
-            float cw=1280f/cols;
-            float ch=88f;
-            float top=61f-appScroll;
+            fill(
+                    canvas,
+                    Color.rgb(
+                            16, 18, 20
+                    ),
+                    0, 0,
+                    1280, 52
+            );
 
-            for(int i=0;i<apps.size();i++){
-                int row=i/cols;
-                int col=i%cols;
+            text(
+                    canvas,
+                    "APPS",
+                    25,
+                    35,
+                    18,
+                    Color.WHITE,
+                    Paint.Align.LEFT
+            );
 
-                float l=col*cw+9;
-                float y=top+row*ch;
-                float r=(col+1)*cw-9;
-                float b=y+76;
+            text(
+                    canvas,
+                    "‹ HOME",
+                    1240,
+                    35,
+                    13,
+                    Color.LTGRAY,
+                    Paint.Align.RIGHT
+            );
 
-                if(b<50 || y>480) continue;
+            int columns = 5;
 
-                fill(c,Color.rgb(18,20,22),l,y,r,b);
+            float cellWidth =
+                    1280f / columns;
 
-                try{
-                    Bitmap icon=iconBitmap(apps.get(i).icon,36,36);
-                    Rect src=new Rect(0,0,icon.getWidth(),icon.getHeight());
-                    RectF dst=new RectF(
-                            (l+9)*sx(),
-                            (y+17)*sy(),
-                            (l+45)*sx(),
-                            (y+53)*sy());
-                    c.drawBitmap(icon,src,dst,p);
-                }catch(Exception ignored){}
+            float cellHeight =
+                    105f;
 
-                String label=apps.get(i).label;
-                if(label.length()>15) label=label.substring(0,14)+"…";
+            float top =
+                    70f - appScroll;
 
-                text(c,label,l+55,y+41,11,Color.WHITE,Paint.Align.LEFT);
+            for (
+                    int i = 0;
+                    i < apps.size();
+                    i++
+            ) {
+
+                int row =
+                        i / columns;
+
+                int column =
+                        i % columns;
+
+                float left =
+                        column * cellWidth + 12;
+
+                float y =
+                        top + row * cellHeight;
+
+                float right =
+                        (column + 1) * cellWidth - 12;
+
+                float bottom =
+                        y + 92;
+
+                if (
+                        bottom < 52 ||
+                        y > 480
+                ) {
+                    continue;
+                }
+
+                fill(
+                        canvas,
+                        Color.rgb(
+                                19, 21, 23
+                        ),
+                        left,
+                        y,
+                        right,
+                        bottom
+                );
+
+                try {
+
+                    Bitmap icon =
+                            iconBitmap(
+                                    apps.get(i).icon,
+                                    42,
+                                    42
+                            );
+
+                    Rect source =
+                            new Rect(
+                                    0, 0,
+                                    icon.getWidth(),
+                                    icon.getHeight()
+                            );
+
+                    RectF destination =
+                            new RectF(
+                                    (left + 15) * sx(),
+                                    (y + 18) * sy(),
+                                    (left + 57) * sx(),
+                                    (y + 60) * sy()
+                            );
+
+                    canvas.drawBitmap(
+                            icon,
+                            source,
+                            destination,
+                            paint
+                    );
+
+                } catch (Exception ignored) {}
+
+                String label =
+                        apps.get(i).label;
+
+                if (label.length() > 18) {
+                    label =
+                            label.substring(
+                                    0,
+                                    17
+                            ) + "…";
+                }
+
+                text(
+                        canvas,
+                        label,
+                        left + 72,
+                        y + 48,
+                        13,
+                        Color.WHITE,
+                        Paint.Align.LEFT
+                );
             }
         }
 
-        @Override public boolean onTouchEvent(MotionEvent e){
-            float x=e.getX()/sx();
-            float y=e.getY()/sy();
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
 
-            if(e.getAction()==MotionEvent.ACTION_DOWN){
-                downX=x;
-                downY=y;
-                lastY=y;
-                vertical=false;
+            float x =
+                    event.getX() / sx();
+
+            float y =
+                    event.getY() / sy();
+
+            if (
+                    event.getAction()
+                            ==
+                    MotionEvent.ACTION_DOWN
+            ) {
+
+                downX = x;
+                downY = y;
+                lastY = y;
+                verticalScrolling = false;
+
                 return true;
             }
 
-            if(e.getAction()==MotionEvent.ACTION_MOVE){
-                float dx=x-downX;
-                float dy=y-downY;
+            if (
+                    event.getAction()
+                            ==
+                    MotionEvent.ACTION_MOVE
+            ) {
 
-                if(page==1 && Math.abs(dy)>Math.abs(dx) && Math.abs(dy)>8){
-                    vertical=true;
+                float dx =
+                        x - downX;
 
-                    appScroll += lastY-y;
+                float dy =
+                        y - downY;
 
-                    float content=((apps.size()+5)/6)*88f;
-                    float max=Math.max(0,content-400f);
+                if (
+                        page == 1 &&
+                        Math.abs(dy) > Math.abs(dx) &&
+                        Math.abs(dy) > 8
+                ) {
 
-                    if(appScroll<0) appScroll=0;
-                    if(appScroll>max) appScroll=max;
+                    verticalScrolling = true;
 
-                    lastY=y;
+                    appScroll += lastY - y;
+
+                    float contentHeight =
+                            ((apps.size() + 4) / 5) * 105f;
+
+                    float maxScroll =
+                            Math.max(
+                                    0,
+                                    contentHeight - 390f
+                            );
+
+                    if (appScroll < 0) {
+                        appScroll = 0;
+                    }
+
+                    if (appScroll > maxScroll) {
+                        appScroll = maxScroll;
+                    }
+
+                    lastY = y;
+
                     invalidate();
                 }
 
                 return true;
             }
 
-            if(e.getAction()==MotionEvent.ACTION_UP){
-                if(page==0){
-                    if(x>=430 && x<=840 && y>=90 && y<=475){
-                        int idx=(int)((y-99)/39f);
+            if (
+                    event.getAction()
+                            ==
+                    MotionEvent.ACTION_UP
+            ) {
 
-                        if(idx>=0 && idx<menu.length){
-                            if(idx==selected) openSelected();
-                            else{
-                                selected=idx;
+                if (page == 0) {
+
+                    if (
+                            x >= 0 &&
+                            x <= 330 &&
+                            y >= 70 &&
+                            y <= 415
+                    ) {
+
+                        int index =
+                                (int)(
+                                        (y - 81) / 53f
+                                );
+
+                        if (
+                                index >= 0 &&
+                                index < menu.length
+                        ) {
+
+                            if (index == selected) {
+                                openSelected();
+                            } else {
+                                selected = index;
                                 invalidate();
                             }
+
                             return true;
                         }
                     }
-                }else{
-                    if(x>1080 && y<60){
-                        page=0;
+
+                } else {
+
+                    if (
+                            x > 1080 &&
+                            y < 60
+                    ) {
+
+                        page = 0;
                         invalidate();
+
                         return true;
                     }
 
-                    int cols=6;
-                    float cw=1280f/cols;
-                    float ay=y-61f+appScroll;
+                    int columns = 5;
 
-                    if(ay>=0){
-                        int col=(int)(x/cw);
-                        int row=(int)(ay/88f);
-                        int idx=row*cols+col;
+                    float cellWidth =
+                            1280f / columns;
 
-                        if(idx>=0 && idx<apps.size()){
-                            try{
-                                startActivity(apps.get(idx).intent);
-                            }catch(Exception ex){
-                                toast("Nu pot porni aplicatia");
+                    float adjustedY =
+                            y - 70f + appScroll;
+
+                    if (adjustedY >= 0) {
+
+                        int column =
+                                (int)(
+                                        x / cellWidth
+                                );
+
+                        int row =
+                                (int)(
+                                        adjustedY / 105f
+                                );
+
+                        int index =
+                                row * columns + column;
+
+                        if (
+                                index >= 0 &&
+                                index < apps.size()
+                        ) {
+
+                            try {
+                                startActivity(
+                                        apps.get(index).intent
+                                );
+                            } catch (Exception e) {
+                                toast(
+                                        "Nu pot porni aplicatia"
+                                );
                             }
+
                             return true;
                         }
                     }
